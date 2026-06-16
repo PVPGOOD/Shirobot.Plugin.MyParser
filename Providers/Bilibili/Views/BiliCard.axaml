@@ -1,0 +1,231 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels"
+             x:Class="Shirobot.Plugin.MyParser.Providers.Bilibili.Views.BiliCard"
+             x:DataType="vm:BiliCardViewModel"
+             Width="360" Height="640">
+
+    <Design.DataContext>
+        <vm:BiliCardViewModel />
+    </Design.DataContext>
+    <Border Width="360"
+            Height="640"
+            CornerRadius="28"
+            ClipToBounds="True"
+            Background="#111318">
+        <Canvas Width="360" Height="640">
+            <Image Canvas.Left="0"
+                   Canvas.Top="0"
+                   Width="360"
+                   Height="640"
+                   Source="{Binding Cover}"
+                   Stretch="UniformToFill"
+                   Opacity="0.20" />
+            <Border Canvas.Left="0"
+                    Canvas.Top="0"
+                    Width="360"
+                    Height="640"
+                    Background="#D0111318" />
+            <Ellipse Canvas.Left="-88"
+                     Canvas.Top="-92"
+                     Width="240"
+                     Height="240"
+                     Fill="#33FB7299" />
+            <Ellipse Canvas.Left="210"
+                     Canvas.Top="80"
+                     Width="190"
+                     Height="190"
+                     Fill="#2600AEEC" />
+            <Border Canvas.Left="16"
+                    Canvas.Top="24"
+                    Width="328"
+                    Height="184"
+                    CornerRadius="24"
+                    ClipToBounds="True"
+                    Background="#1B1B20"
+                    BorderBrush="#33FFFFFF"
+                    BorderThickness="1">
+                <Grid>
+                    <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                    <Border VerticalAlignment="Bottom" Height="72">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                <GradientStop Color="#00000000" Offset="0" />
+                                <GradientStop Color="#CC000000" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
+                    <Border HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,12,12"
+                            CornerRadius="999"
+                            Padding="10,5"
+                            Background="#E6000000">
+                        <TextBlock Text="{Binding DurationText}"
+                                   Foreground="#FFFFFFFF"
+                                   FontSize="11"
+                                   FontWeight="SemiBold" />
+                    </Border>
+                </Grid>
+            </Border>
+            <Border Canvas.Left="16"
+                    Canvas.Top="224"
+                    Width="328"
+                    Height="392"
+                    CornerRadius="28"
+                    Background="#F41D1B20"
+                    BorderBrush="#30CAC4D0"
+                    BorderThickness="1"
+                    Padding="16">
+                <StackPanel Spacing="14">
+                    <Grid ColumnDefinitions="52,*,Auto" Height="52">
+                        <Border Grid.Column="0"
+                                Width="44"
+                                Height="44"
+                                CornerRadius="22"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                ClipToBounds="True"
+                                Background="#2B2930"
+                                BorderBrush="#FB7299"
+                                BorderThickness="2">
+                            <Image Source="{Binding Avatar}" Stretch="UniformToFill" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding AuthorName}"
+                                           Foreground="#F4EFF4"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="165" />
+                                <Border Background="#FB7299"
+                                        CornerRadius="999"
+                                        Padding="6,2"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="UP"
+                                               Foreground="#FFFFFF"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                </Border>
+                            </StackPanel>
+                            <TextBlock Text="{Binding AuthorMeta}"
+                                       Foreground="#CAC4D0"
+                                       FontSize="11"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Border Grid.Column="2"
+                                VerticalAlignment="Center"
+                                CornerRadius="999"
+                                Padding="8,4"
+                                Background="#29FB7299">
+                            <TextBlock Text="B站"
+                                       Foreground="#FFD8E7"
+                                       FontSize="10"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                    </Grid>
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding Title}"
+                                   Foreground="#F4EFF4"
+                                   FontSize="17"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   MaxLines="3"
+                                   LineHeight="22" />
+                        <TextBlock Text="{Binding Description}"
+                                   Foreground="#CAC4D0"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   MaxLines="2"
+                                   LineHeight="17" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border CornerRadius="999"
+                                Padding="10,5"
+                                Background="#2A00AEEC"
+                                BorderBrush="#6600AEEC"
+                                BorderThickness="1">
+                            <TextBlock Text="# Bilibili"
+                                       Foreground="#A6EDFF"
+                                       FontSize="11"
+                                       FontWeight="Medium" />
+                        </Border>
+                        <Border CornerRadius="999"
+                                Padding="10,5"
+                                Background="#2AFB7299"
+                                BorderBrush="#66FB7299"
+                                BorderThickness="1">
+                            <TextBlock Text="{Binding TagsText}"
+                                       Foreground="#FFD8E7"
+                                       FontSize="11"
+                                       FontWeight="Medium"
+                                       TextTrimming="CharacterEllipsis"
+                                       MaxWidth="160" />
+                        </Border>
+                    </StackPanel>
+                    <Border CornerRadius="22"
+                            Background="#2B2930"
+                            BorderBrush="#30CAC4D0"
+                            BorderThickness="1"
+                            Padding="8,10">
+                        <Grid ColumnDefinitions="*,*,*,*">
+                            <StackPanel Grid.Column="0" Spacing="5" HorizontalAlignment="Center">
+                                <Path Data="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"
+                                      Fill="#FB7299"
+                                      Width="20"
+                                      Height="20"
+                                      Stretch="Uniform" />
+                                <TextBlock Text="{Binding LikeCount}"
+                                           Foreground="#FFD8E7"
+                                           FontSize="10"
+                                           FontWeight="Medium"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Spacing="5" HorizontalAlignment="Center">
+                                <Path Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"
+                                      Fill="#00AEEC"
+                                      Width="20"
+                                      Height="20"
+                                      Stretch="Uniform" />
+                                <TextBlock Text="{Binding CoinCount}"
+                                           Foreground="#A6EDFF"
+                                           FontSize="10"
+                                           FontWeight="Medium"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Spacing="5" HorizontalAlignment="Center">
+                                <Path Data="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+                                      Fill="#FFB020"
+                                      Width="20"
+                                      Height="20"
+                                      Stretch="Uniform" />
+                                <TextBlock Text="{Binding CollectCount}"
+                                           Foreground="#FFE1A3"
+                                           FontSize="10"
+                                           FontWeight="Medium"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="3" Spacing="5" HorizontalAlignment="Center">
+                                <Path Data="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"
+                                      Fill="#CAC4D0"
+                                      Width="20"
+                                      Height="20"
+                                      Stretch="Uniform" />
+                                <TextBlock Text="{Binding ShareCount}"
+                                           Foreground="#CAC4D0"
+                                           FontSize="10"
+                                           FontWeight="Medium"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </Canvas>
+    </Border>
+</UserControl>

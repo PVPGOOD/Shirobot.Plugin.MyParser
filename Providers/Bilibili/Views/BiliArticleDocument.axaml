@@ -1,0 +1,69 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels"
+             x:Class="Shirobot.Plugin.MyParser.Providers.Bilibili.Views.BiliArticleDocument"
+             x:DataType="vm:BiliArticleDocumentViewModel"
+             Width="720"
+             Height="{Binding CanvasHeight}">
+    <Design.DataContext>
+        <vm:BiliArticleDocumentViewModel />
+    </Design.DataContext>
+
+    <Border Width="720" Height="{Binding CanvasHeight}" Background="#0F1115">
+        <StackPanel Margin="48,44,48,44" Spacing="24">
+            <Grid ColumnDefinitions="56,*,Auto" Height="60">
+                <Border Grid.Column="0" Width="46" Height="46" CornerRadius="23" ClipToBounds="True" Background="#2B2930" BorderBrush="#FB7299" BorderThickness="2" VerticalAlignment="Center">
+                    <Image Source="{Binding Avatar}" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                    <TextBlock Text="{Binding AuthorName}" Foreground="#F4EFF4" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding MetaText}" Foreground="#CAC4D0" FontSize="12" />
+                </StackPanel>
+                <Border Grid.Column="2" VerticalAlignment="Center" CornerRadius="999" Background="#29FB7299" Padding="12,6">
+                    <TextBlock Text="{Binding KindText}" Foreground="#FFD8E7" FontSize="12" FontWeight="SemiBold" />
+                </Border>
+            </Grid>
+
+            <TextBlock Text="{Binding Title}" Foreground="#FFFFFF" FontSize="26" FontWeight="Bold" TextWrapping="Wrap" LineHeight="34" />
+
+            <Border CornerRadius="18" Background="#1D1B20" BorderBrush="#30CAC4D0" BorderThickness="1" Padding="14,10">
+                <TextBlock Text="{Binding StatsText}" Foreground="#E6E0E9" FontSize="13" TextWrapping="Wrap" />
+            </Border>
+
+            <ItemsControl ItemsSource="{Binding Blocks}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:BiliArticleDocumentBlockViewModel">
+                        <StackPanel Spacing="8" Margin="0,0,0,10">
+                            <Border IsVisible="{Binding IsImage}" CornerRadius="16" ClipToBounds="True" Background="#1D1B20" BorderBrush="#22FFFFFF" BorderThickness="1" Height="{Binding Height}">
+                                <Image Source="{Binding Image}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock IsVisible="{Binding IsImage}" Text="{Binding Caption}" Foreground="#938F99" FontSize="11" HorizontalAlignment="Center" />
+
+                            <Grid IsVisible="{Binding IsText}" Margin="{Binding Margin}" ColumnDefinitions="Auto,*">
+                                <Border Grid.Column="0"
+                                        IsVisible="{Binding HasAccent}"
+                                        Width="{Binding AccentWidth}"
+                                        CornerRadius="999"
+                                        Background="{Binding AccentBrush}"
+                                        Margin="0,4,10,4" />
+                                <Border Grid.Column="1"
+                                        CornerRadius="10"
+                                        Background="{Binding Background}"
+                                        BorderBrush="{Binding BorderBrush}"
+                                        BorderThickness="1"
+                                        Padding="10,8">
+                                    <TextBlock Text="{Binding Text}"
+                                               Foreground="{Binding Foreground}"
+                                               FontSize="{Binding FontSize}"
+                                               FontWeight="{Binding FontWeight}"
+                                               TextWrapping="Wrap"
+                                               LineHeight="{Binding LineHeight}" />
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </Border>
+</UserControl>

@@ -1,0 +1,44 @@
+# Build outputs
+bin/
+obj/
+out/
+publish/
+artifacts/
+
+# IDE / editor
+.idea/
+.vs/
+.vscode/
+*.DotSettings.user
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+Properties/launchSettings.json
+
+# Runtime data / downloaded media
+downloads/
+Shirobot.Plugin.MyParser/
+*.tmp
+*.temp
+*.log
+
+# Secrets / local config
+*_cookie.txt
+douyin_cookie.txt
+bilibili_cookie.txt
+appsettings.Local.json
+appsettings.Development.local.json
+*.local.json
+.env
+.env.*
+!.env.example
+
+# Plugin packages
+*.nupkg
+*.snupkg
+*.pdb
+
+# OS files
+.DS_Store
+Thumbs.db

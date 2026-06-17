@@ -1,15 +1,22 @@
 using Shirobot.Plugin.MyParser.Parsing;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Models;
+using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Utilities;
+using ShiroBot.Model.Common;
 
 namespace Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Facade;
 
-internal sealed class XiaohongshuParseProvider(XiaohongshuParser parser) : IParseProvider, IDisposable
+internal sealed class XiaohongshuParseProvider(XiaohongshuParser parser) : IIncomingMessageParseProvider, IDisposable
 {
     public string Id => "xiaohongshu";
     public string Name => "小红书";
     public XiaohongshuParser Parser { get; } = parser;
 
     public bool CanHandle(string text) => XiaohongshuParser.ContainsXiaohongshuUrl(text);
+
+    public string? ExtractParseText(IncomingMessage message)
+    {
+        return XiaohongshuLightAppUrlExtractor.ExtractParseText(message);
+    }
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)
     {

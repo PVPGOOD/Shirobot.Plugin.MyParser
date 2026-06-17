@@ -244,25 +244,42 @@ dotnet build -c Release
 dotnet publish -c Release
 ```
 
-调试时如需自动复制到本机 [ShiroBot](https://github.com/ShirokaProject/ShiroBot) 宿主目录，可以使用项目根目录下的 `.env` 指定宿主程序路径。`.env` 已被 `.gitignore` 忽略。
+### 本地调试配置
+
+本项目区分 **运行配置** 和 **构建输出配置**：
+
+- `.env`：给 Rider / 本地运行配置读取，主要用于指定要启动的 ShiroBot 宿主。
+- `Directory.Build.local.props`：给 MSBuild 读取，用于把 Debug 构建产物直接输出到 ShiroBot 插件目录。
+
+这两个文件都属于本机私有配置，不应提交到仓库；`.gitignore` 已忽略它们。
 
 `.env` 示例：
 
 ```env
+# Rider / 本地运行配置使用：启动这个 ShiroBot 宿主。
 HOST_EXE=C:\Path\To\ShiroBot\bin\Debug\net10.0\ShiroBot.exe
+
+# 可选：给运行配置或脚本识别插件目录；MSBuild 是否输出到这里，以 Directory.Build.local.props 为准。
+HOST_PLUGIN_DIR=C:\Path\To\ShiroBot\bin\Debug\net10.0\plugins\Shirobot.Plugin.MyParser
 ```
 
-也可以使用 MSBuild 属性覆盖：
+`Directory.Build.local.props` 示例：
+
+```xml
+<Project>
+  <PropertyGroup>
+    <HostPluginDir>C:\Path\To\ShiroBot\bin\Debug\net10.0\plugins\Shirobot.Plugin.MyParser\</HostPluginDir>
+  </PropertyGroup>
+</Project>
+```
+
+配置好后，普通 Debug 构建会直接生成到宿主插件目录：
 
 ```bash
-dotnet build -c Debug -p:HostExe="C:\Path\To\ShiroBot\bin\Debug\net10.0\ShiroBot.exe"
+dotnet build -c Debug
 ```
 
-或使用宿主项目根目录：
-
-```bash
-dotnet build -c Debug -p:HostProjectRoot="C:\Path\To\ShiroBot\"
-```
+> 注意：Rider 的 `.env` 通常只注入运行进程，不一定会注入 MSBuild 项目评估阶段。因此不要只依赖 `.env` 控制插件输出目录；请使用 `Directory.Build.local.props` 指定 `HostPluginDir`。
 
 ## 部署
 

@@ -4,6 +4,7 @@ using System.Text;
 using Net.Codecrete.QrCodeGenerator;
 using ShiroBot.AvaloniaSdk;
 using Shirobot.Plugin.MyParser.Parsing;
+using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Infrastructure;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Models;
@@ -19,11 +20,7 @@ namespace Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Impl.MessageHandling;
 
 internal sealed class XiaohongshuMessageHandler : IDisposable
 {
-    private static readonly HttpClient ImageHttp = new(new HttpClientHandler
-    {
-        AutomaticDecompression = DecompressionMethods.All,
-        AllowAutoRedirect = true,
-    });
+    private static readonly HttpClient ImageHttp = RemoteImageFetchService.CreateImageHttpClient();
 
     private readonly IBotContext _context;
     private readonly MyParserConfig _config;
@@ -144,8 +141,8 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         string? fileUploadInfo = null;
         try
         {
+            _ = StartSendCoverOrCardAsync(message, result);
             var videoSegment = await BuildVideoSegmentAsync(result);
-            await SendCoverOrCardAsync(message, result);
             await SendVideoMessageAsync(message, result, videoSegment);
 
             if (_config.UploadVideoAsFile && !_config.UploadVideoAsFileOnlyOnVideoSendFailure && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
@@ -184,6 +181,16 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
             throw;
         }
+    }
+
+    private Task StartSendCoverOrCardAsync(IncomingMessage message, XiaohongshuParseResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.CoverUrl) && result.Images.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return MessageHandlerCommon.RunLoggedBackgroundAsync($"小红书封面卡片异步发送: note_id={result.NoteId}", () => SendCoverOrCardAsync(message, result));
     }
 
     private async Task<VideoOutgoingSegment> BuildVideoSegmentAsync(XiaohongshuParseResult result)
@@ -259,9 +266,13 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         var senderId = GetBotOrSenderId(message);
         var senderName = string.IsNullOrWhiteSpace(result.AuthorName) ? "小红书图文" : result.AuthorName!;
         forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, [new TextOutgoingSegment(BuildHeaderText(result))]));
-        foreach (var (image, index) in result.Images.Take(max).Select((image, index) => (image, index + 1)))
+        var imageInputs = result.Images.Take(max).Select((image, index) => (image, Index: index + 1)).ToArray();
+        var imageFiles = await MessageFetchConcurrency.SelectParallelOrderedAsync(
+            imageInputs,
+            MessageFetchConcurrency.DefaultImageConcurrency,
+            item => BuildRemoteImageAsync(item.image.Url, result.SourceUrl, $"xhs_image_{result.NoteId}_{item.Index:D2}"));
+        foreach (var local in imageFiles)
         {
-            var local = await BuildRemoteImageAsync(image.Url, result.SourceUrl, $"xhs_image_{result.NoteId}_{index:D2}");
             if (!string.IsNullOrWhiteSpace(local.Uri))
             {
                 forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, [new ImageOutgoingSegment(local.Uri)]));
@@ -314,9 +325,13 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
         try
         {
-            var cover = await BuildRemoteImageAsync(result.Images[0].Url, result.SourceUrl, $"xhs_card_cover_{result.NoteId}");
-            var second = await BuildRemoteImageAsync(result.Images.ElementAtOrDefault(1)?.Url ?? result.Images[0].Url, result.SourceUrl, $"xhs_card_second_{result.NoteId}");
-            var avatar = await BuildRemoteImageAsync(result.AuthorAvatarUrl, result.SourceUrl, $"xhs_card_avatar_{result.NoteId}");
+            var coverTask = BuildRemoteImageAsync(result.Images[0].Url, result.SourceUrl, $"xhs_card_cover_{result.NoteId}");
+            var secondTask = BuildRemoteImageAsync(result.Images.ElementAtOrDefault(1)?.Url ?? result.Images[0].Url, result.SourceUrl, $"xhs_card_second_{result.NoteId}");
+            var avatarTask = BuildRemoteImageAsync(result.AuthorAvatarUrl, result.SourceUrl, $"xhs_card_avatar_{result.NoteId}");
+            await Task.WhenAll(coverTask, secondTask, avatarTask);
+            var cover = await coverTask;
+            var second = await secondTask;
+            var avatar = await avatarTask;
             var vm = new XiaohongshuCardViewModel
             {
                 Cover = !string.IsNullOrWhiteSpace(cover.LocalPath) ? RenderBitmapUtilities.DecodeImageFileForRender(cover.LocalPath) : RenderBitmapUtilities.DecodeBase64ImageForRender(cover.Uri),
@@ -356,58 +371,25 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         }
     }
 
-    private async Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
+    private Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl))
-        {
-            return (string.Empty, null);
-        }
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
-            request.Headers.TryAddWithoutValidation("User-Agent", XiaohongshuConstants.UserAgent);
-            request.Headers.TryAddWithoutValidation("Referer", referer ?? XiaohongshuConstants.Origin + "/");
-            request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
-            if (!string.IsNullOrWhiteSpace(_config.XiaohongshuCookie))
+        return RemoteImageFetchService.BuildRemoteImageAsync(
+            ImageHttp,
+            "小红书",
+            imageUrl,
+            referer,
+            filePrefix,
+            ResolveDownloadDirectory(),
+            request =>
             {
-                request.Headers.TryAddWithoutValidation("Cookie", _config.XiaohongshuCookie);
-            }
-
-            using var response = await ImageHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            const long maxBytes = 10 * 1024L * 1024L;
-            if (response.Content.Headers.ContentLength is > maxBytes)
-            {
-                return (imageUrl, null);
-            }
-
-            await using var input = await response.Content.ReadAsStreamAsync();
-            using var output = new MemoryStream();
-            var buffer = new byte[64 * 1024];
-            long total = 0;
-            while (true)
-            {
-                var read = await input.ReadAsync(buffer);
-                if (read == 0) break;
-                total += read;
-                if (total > maxBytes) return (imageUrl, null);
-                output.Write(buffer, 0, read);
-            }
-
-            var bytes = output.ToArray();
-            var ext = MediaUriUtilities.GuessImageExtension(response.Content.Headers.ContentType?.MediaType, imageUrl, bytes);
-            var dir = ResolveDownloadDirectory();
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"{SanitizeLocalFileName(filePrefix)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}{ext}");
-            await File.WriteAllBytesAsync(path, bytes);
-            return ("base64://" + Convert.ToBase64String(bytes), path);
-        }
-        catch (Exception ex)
-        {
-            BotLog.Warning($"MyParser 小红书图片下载失败，回退 URL: url={imageUrl}, error={ex.Message}");
-            return (imageUrl, null);
-        }
+                request.Headers.TryAddWithoutValidation("User-Agent", XiaohongshuConstants.UserAgent);
+                request.Headers.TryAddWithoutValidation("Referer", referer ?? XiaohongshuConstants.Origin + "/");
+                request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
+                if (!string.IsNullOrWhiteSpace(_config.XiaohongshuCookie))
+                {
+                    request.Headers.TryAddWithoutValidation("Cookie", _config.XiaohongshuCookie);
+                }
+            });
     }
 
     private async Task SendQrImageAsync(IncomingMessage message, string text, string fileName)
@@ -427,59 +409,19 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         return ("base64://" + Convert.ToBase64String(png), path);
     }
 
-    private async Task SendImageAsync(IncomingMessage message, ImageOutgoingSegment segment)
+    private Task SendImageAsync(IncomingMessage message, ImageOutgoingSegment segment)
     {
-        switch (message)
-        {
-            case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, segment);
-                break;
-            case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, segment);
-                break;
-            default:
-                await _context.Message.ReplyAsync(message, segment);
-                break;
-        }
+        return MessageHandlerCommon.SendImageAsync(_context, message, segment);
     }
 
-    private async Task<string> UploadVideoFileAsync(IncomingMessage message, XiaohongshuParseResult result)
+    private Task<string> UploadVideoFileAsync(IncomingMessage message, XiaohongshuParseResult result)
     {
-        if (string.IsNullOrWhiteSpace(result.LocalVideoPath) || !File.Exists(result.LocalVideoPath))
-        {
-            throw new InvalidOperationException("本地视频文件不存在。");
-        }
-
-        var localPath = Path.GetFullPath(result.LocalVideoPath);
-        var fileSize = new FileInfo(localPath).Length;
-        var useBase64 = _config.UploadVideoAsBase64 && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, _config.UploadVideoBase64MaxMegabytes);
-        var fileUri = useBase64 ? "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath)) : new Uri(localPath).AbsoluteUri;
-        var fileName = Path.GetFileName(localPath);
-        var uploadMode = useBase64 ? "base64" : "file";
-        var stopwatch = Stopwatch.StartNew();
-        return message switch
-        {
-            GroupIncomingMessage group => $"群文件 FileId={(await _context.File.UploadGroupFileAsync(group.Group.GroupId, fileUri, fileName)).FileId} Mode={uploadMode} elapsed={stopwatch.Elapsed:mm\\:ss}",
-            FriendIncomingMessage friend => $"私聊文件 FileId={(await _context.File.UploadPrivateFileAsync(friend.SenderId, fileUri, fileName)).FileId} Mode={uploadMode} elapsed={stopwatch.Elapsed:mm\\:ss}",
-            _ => throw new NotSupportedException("当前消息类型不支持文件上传。"),
-        };
+        return MessageHandlerCommon.UploadLocalVideoFileAsync(_context, _config, message, result.LocalVideoPath, "小红书", result.NoteId);
     }
 
-    private async Task TryReactToSourceMessageAsync(IncomingMessage message, string faceId)
+    private Task TryReactToSourceMessageAsync(IncomingMessage message, string faceId)
     {
-        if (message is not GroupIncomingMessage group)
-        {
-            return;
-        }
-
-        try
-        {
-            await _context.Group.SendGroupMessageReactionAsync(group.Group.GroupId, group.MessageSeq, faceId);
-        }
-        catch (Exception ex)
-        {
-            BotLog.Warning($"MyParser 小红书消息贴表情失败: group_id={group.Group.GroupId}, message_seq={group.MessageSeq}, face={faceId}, error={ex.Message}");
-        }
+        return MessageHandlerCommon.ReactAsync(_context, message, faceId, "小红书");
     }
 
     private void SaveXiaohongshuCookieToPluginDirectory()
@@ -490,30 +432,12 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
     {
-        var pluginDir = Path.GetDirectoryName(_context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        var cookieDir = string.IsNullOrWhiteSpace(_config.CookieDirectory)
-            ? Path.Combine(pluginDir, "cookie")
-            : _config.CookieDirectory.Trim();
-
-        if (!Path.IsPathRooted(cookieDir))
-        {
-            cookieDir = Path.Combine(pluginDir, cookieDir);
-        }
-
-        Directory.CreateDirectory(cookieDir);
-        var fileName = string.IsNullOrWhiteSpace(configuredFileName) ? defaultFileName : configuredFileName.Trim();
-        if (Path.IsPathRooted(fileName))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? cookieDir);
-            return fileName;
-        }
-
-        return Path.Combine(cookieDir, fileName);
+        return MessageHandlerCommon.ResolveCookiePath(_context, _config, configuredFileName, defaultFileName);
     }
 
     private Task ReplyAsync(IncomingMessage message, string text)
     {
-        return _config.QuoteReply ? _context.Message.QuoteReplyAsync(message, text) : _context.Message.ReplyAsync(message, text);
+        return MessageHandlerCommon.ReplyTextAsync(_context, _config, message, text);
     }
 
     private LocalVideoHttpServer GetLocalVideoHttpServer()
@@ -567,13 +491,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         _ => 0,
     };
 
-    private static string GetMessageScene(IncomingMessage message) => message switch
-    {
-        GroupIncomingMessage => "group",
-        FriendIncomingMessage => "friend",
-        TempIncomingMessage => "temp",
-        _ => message.GetType().Name,
-    };
+    private static string GetMessageScene(IncomingMessage message) => MessageHandlerCommon.GetMessageScene(message);
 
     private string ResolveDownloadDirectory()
     {

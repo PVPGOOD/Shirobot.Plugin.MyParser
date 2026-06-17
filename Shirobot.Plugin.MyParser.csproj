@@ -7,7 +7,7 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <!-- 本地调试输出目录：Rider 运行配置可从 .env 注入 HOST_PLUGIN_DIR 环境变量。 -->
+        <!-- 本地调试输出目录：优先 Directory.Build.local.props，其次环境变量 HOST_PLUGIN_DIR。 -->
         <HostPluginDir Condition="'$(HostPluginDir)'=='' And '$(HOST_PLUGIN_DIR)'!=''">$(HOST_PLUGIN_DIR)</HostPluginDir>
         <HostPluginDir Condition="'$(HostPluginDir)'==''"></HostPluginDir>
         <AppendTargetFrameworkToOutputPath Condition="'$(Configuration)'=='Debug' And '$(HostPluginDir)'!=''">false</AppendTargetFrameworkToOutputPath>
@@ -25,6 +25,10 @@
 
     <ItemGroup>
       <Content Include=".github\workflows\release.yml" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Providers\Bilibili\Impl\MessageHandling\Impl\" />
     </ItemGroup>
 
     <Target Name="CleanHostProvidedDebugOutput" AfterTargets="Build" Condition="'$(Configuration)'=='Debug' And '$(HostPluginDir)'!=''">

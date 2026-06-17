@@ -10,6 +10,7 @@ using System.Net;
 using System.Text;
 using ShiroBot.AvaloniaSdk;
 using Shirobot.Plugin.MyParser.Parsing;
+using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Core;
@@ -19,11 +20,7 @@ namespace Shirobot.Plugin.MyParser.Providers.Douyin.Impl.MessageHandling;
 
 internal sealed class DouyinMessageHandler : IDisposable
 {
-    private static readonly HttpClient CoverHttp = new(new HttpClientHandler
-    {
-        AutomaticDecompression = DecompressionMethods.All,
-        AllowAutoRedirect = true,
-    });
+    private static readonly HttpClient CoverHttp = RemoteImageFetchService.CreateImageHttpClient();
 
     private readonly IBotContext _context;
     private readonly MyParserConfig _config;
@@ -74,6 +71,7 @@ internal sealed class DouyinMessageHandler : IDisposable
             {
                 try
                 {
+                    _ = StartSendCoverMessageAsync(message, result);
                     var videoSegment = await BuildVideoSegmentAsync(result);
                     if (videoSegment is null)
                     {
@@ -187,21 +185,9 @@ internal sealed class DouyinMessageHandler : IDisposable
         }
     }
 
-    private async Task TryReactToSourceMessageAsync(IncomingMessage message, string faceId)
+    private Task TryReactToSourceMessageAsync(IncomingMessage message, string faceId)
     {
-        if (message is not GroupIncomingMessage group)
-        {
-            return;
-        }
-
-        try
-        {
-            await _context.Group.SendGroupMessageReactionAsync(group.Group.GroupId, group.MessageSeq, faceId);
-        }
-        catch (Exception ex)
-        {
-            BotLog.Warning($"MyParser Douyin 消息贴表情失败: group_id={group.Group.GroupId}, message_seq={group.MessageSeq}, face={faceId}, error={ex.Message}");
-        }
+        return MessageHandlerCommon.ReactAsync(_context, message, faceId, "Douyin");
     }
 
     private static void LogDouyinQualityInfo(DouyinParseResult result)
@@ -316,13 +302,18 @@ private void LogFinalVideoFileInfo(DouyinParseResult result)
             + $"path={result.LocalVideoPath}");
     }
 
-    private async Task SendVideoMessageAsync(IncomingMessage message, DouyinParseResult result, VideoOutgoingSegment videoSegment)
+    private Task StartSendCoverMessageAsync(IncomingMessage message, DouyinParseResult result)
     {
-        if (_config.SendCoverWithVideoSegment && !string.IsNullOrWhiteSpace(result.CoverUrl))
+        if (!_config.SendCoverWithVideoSegment || string.IsNullOrWhiteSpace(result.CoverUrl))
         {
-            await SendCoverMessageAsync(message, result);
+            return Task.CompletedTask;
         }
 
+        return MessageHandlerCommon.RunLoggedBackgroundAsync($"抖音封面卡片异步发送: aweme_id={result.AwemeId}", () => SendCoverMessageAsync(message, result));
+    }
+
+    private async Task SendVideoMessageAsync(IncomingMessage message, DouyinParseResult result, VideoOutgoingSegment videoSegment)
+    {
         var segments = new OutgoingSegment[] { videoSegment };
         var stopwatch = Stopwatch.StartNew();
         var uriMode = MediaUriUtilities.GetUriMode(videoSegment.Uri);
@@ -362,13 +353,7 @@ private void LogFinalVideoFileInfo(DouyinParseResult result)
         }
     }
 
-    private static string GetMessageScene(IncomingMessage message) => message switch
-    {
-        GroupIncomingMessage => "group",
-        FriendIncomingMessage => "friend",
-        TempIncomingMessage => "temp",
-        _ => message.GetType().Name,
-    };
+    private static string GetMessageScene(IncomingMessage message) => MessageHandlerCommon.GetMessageScene(message);
 
 private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseResult result)
     {
@@ -389,9 +374,18 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
         var senderId = GetBotOrSenderId(message);
         var senderName = string.IsNullOrWhiteSpace(result.AuthorName) ? "抖音图文" : result.AuthorName!;
 
-        foreach (var (image, index) in result.Images.Take(max).Select((image, index) => (image, index + 1)))
+        var imageInputs = result.Images.Take(max).Select((image, index) => (image, Index: index + 1)).ToArray();
+        var imageFiles = await MessageFetchConcurrency.SelectParallelOrderedAsync(
+            imageInputs,
+            MessageFetchConcurrency.DefaultImageConcurrency,
+            item => BuildRemoteImageAsync(item.image.Url, result.SourceUrl, $"douyin_image_{result.AwemeId}_{item.Index:D2}"));
+        foreach (var imageFile in imageFiles)
         {
-            var imageFile = await BuildRemoteImageAsync(image.Url, result.SourceUrl, $"douyin_image_{result.AwemeId}_{index:D2}");
+            if (string.IsNullOrWhiteSpace(imageFile.Uri))
+            {
+                continue;
+            }
+
             var segments = new List<OutgoingSegment>
             {
                 new ImageOutgoingSegment(imageFile.Uri),
@@ -553,7 +547,11 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
 
     private async Task<string> BuildCoverCardUriAsync(DouyinParseResult result)
     {
-        var coverImage = await BuildCoverImageAsync(result);
+        var coverTask = BuildCoverImageAsync(result);
+        var avatarTask = _context.Render is null
+            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            : BuildRemoteImageAsync(result.AuthorAvatarUrl, result.SourceUrl, $"douyin_avatar_{result.AwemeId}");
+        var coverImage = await coverTask;
         var coverUri = coverImage.Uri;
         if (_context.Render is null)
         {
@@ -563,10 +561,10 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
 
         try
         {
+            var avatarImage = await avatarTask;
             var coverBitmap = !string.IsNullOrWhiteSpace(coverImage.LocalPath)
                 ? RenderBitmapUtilities.DecodeImageFileForRender(coverImage.LocalPath)
                 : RenderBitmapUtilities.DecodeBase64ImageForRender(coverUri);
-            var avatarImage = await BuildRemoteImageAsync(result.AuthorAvatarUrl, result.SourceUrl, $"douyin_avatar_{result.AwemeId}");
             var avatarBitmap = !string.IsNullOrWhiteSpace(avatarImage.LocalPath)
                 ? RenderBitmapUtilities.DecodeImageFileForRender(avatarImage.LocalPath)
                 : RenderBitmapUtilities.DecodeBase64ImageForRender(avatarImage.Uri);
@@ -715,70 +713,21 @@ private static string BuildCoverCardSubtitle(DouyinParseResult result)
         return await BuildRemoteImageAsync(coverUrl, result.SourceUrl, $"douyin_cover_{result.AwemeId}");
     }
 
-    private async Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
+    private Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl))
-        {
-            return (string.Empty, null);
-        }
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
-            request.Headers.TryAddWithoutValidation("User-Agent", DouyinConstants.UserAgent);
-            request.Headers.TryAddWithoutValidation("Referer", referer ?? "https://www.douyin.com/");
-            request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
-
-            using var response = await CoverHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            var contentLength = response.Content.Headers.ContentLength;
-            const long maxBytes = 10 * 1024L * 1024L;
-            if (contentLength is > 0 && contentLength > maxBytes)
+        return RemoteImageFetchService.BuildRemoteImageAsync(
+            CoverHttp,
+            "抖音",
+            imageUrl,
+            referer,
+            filePrefix,
+            ResolveCoverDownloadDirectory(),
+            request =>
             {
-                BotLog.Warning($"MyParser 图片过大，回退原始 URL: url={imageUrl}, image_mb={contentLength.Value / 1024d / 1024d:F2}, limit_mb=10");
-                return (imageUrl, null);
-            }
-
-            await using var input = await response.Content.ReadAsStreamAsync();
-            using var output = new MemoryStream();
-            var buffer = new byte[64 * 1024];
-            long total = 0;
-            while (true)
-            {
-                var read = await input.ReadAsync(buffer);
-                if (read == 0)
-                {
-                    break;
-                }
-
-                total += read;
-                if (total > maxBytes)
-                {
-                    BotLog.Warning($"MyParser 图片下载超过限制，回退原始 URL: url={imageUrl}, limit_mb=10");
-                    return (imageUrl, null);
-                }
-
-                output.Write(buffer, 0, read);
-            }
-
-            var bytes = output.ToArray();
-            var contentType = response.Content.Headers.ContentType?.MediaType;
-            var extension = MediaUriUtilities.GuessImageExtension(contentType, imageUrl, bytes);
-            var localDir = ResolveCoverDownloadDirectory();
-            Directory.CreateDirectory(localDir);
-            var localPath = Path.Combine(localDir, $"{SanitizeLocalFileName(filePrefix)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}{extension}");
-            await File.WriteAllBytesAsync(localPath, bytes);
-
-            var uri = "base64://" + Convert.ToBase64String(bytes);
-            BotLog.Info($"MyParser 图片下载完成: source_url={imageUrl}, content_type={contentType}, bytes={total}, local_path={localPath}");
-            return (uri, localPath);
-        }
-        catch (Exception ex)
-        {
-            BotLog.Warning($"MyParser 图片转 base64/本地文件失败，回退原始 URL: url={imageUrl}, error={ex.Message}");
-            return (imageUrl, null);
-        }
+                request.Headers.TryAddWithoutValidation("User-Agent", DouyinConstants.UserAgent);
+                request.Headers.TryAddWithoutValidation("Referer", referer ?? "https://www.douyin.com/");
+                request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
+            });
     }
 
     private static string ResolveCoverDownloadDirectory()
@@ -801,43 +750,9 @@ private static void LogCoverImageInfo(DouyinParseResult result, string mode, lon
         BotLog.Info($"MyParser 封面 ImageSegment URI 模式：aweme_id={result.AwemeId}, mode={mode}, size_kb={(bytes > 0 ? bytes / 1024d : 0):F1}, uri_preview={MediaUriUtilities.PreviewUri(uri)}");
     }
 
-    private async Task<string> UploadVideoFileAsync(IncomingMessage message, DouyinParseResult result)
+    private Task<string> UploadVideoFileAsync(IncomingMessage message, DouyinParseResult result)
     {
-        if (string.IsNullOrWhiteSpace(result.LocalVideoPath) || !File.Exists(result.LocalVideoPath))
-        {
-            throw new InvalidOperationException("本地视频文件不存在。");
-        }
-
-        var localPath = Path.GetFullPath(result.LocalVideoPath);
-        var fileSize = new FileInfo(localPath).Length;
-        var base64LimitBytes = Math.Max(0, _config.UploadVideoBase64MaxMegabytes) * 1024L * 1024L;
-        var useBase64 = _config.UploadVideoAsBase64
-                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, _config.UploadVideoBase64MaxMegabytes);
-        var fileUri = useBase64
-            ? "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath))
-            : new Uri(localPath).AbsoluteUri;
-        var fileName = Path.GetFileName(localPath);
-        var uploadMode = useBase64 ? "base64" : "file";
-        BotLog.Info($"MyParser 文件上传 URI 模式：{uploadMode}, file_mb={fileSize / 1024d / 1024d:F2}, base64_limit_mb={_config.UploadVideoBase64MaxMegabytes}");
-
-        var stopwatch = Stopwatch.StartNew();
-        BotLog.Info($"MyParser 文件上传开始: aweme_id={result.AwemeId}, mode={uploadMode}, file_mb={fileSize / 1024d / 1024d:F2}, file={localPath}");
-
-        switch (message)
-        {
-            case GroupIncomingMessage group:
-            {
-                var response = await _context.File.UploadGroupFileAsync(group.Group.GroupId, fileUri, fileName);
-                return $"群文件 FileId={response.FileId} Mode={uploadMode} elapsed={stopwatch.Elapsed:mm\\:ss}";
-            }
-            case FriendIncomingMessage friend:
-            {
-                var response = await _context.File.UploadPrivateFileAsync(friend.SenderId, fileUri, fileName);
-                return $"私聊文件 FileId={response.FileId} Mode={uploadMode} elapsed={stopwatch.Elapsed:mm\\:ss}";
-            }
-            default:
-                throw new NotSupportedException("当前消息类型不支持文件上传。");
-        }
+        return MessageHandlerCommon.UploadLocalVideoFileAsync(_context, _config, message, result.LocalVideoPath, "抖音", result.AwemeId);
     }
 
     private string FormatDouyinResult(

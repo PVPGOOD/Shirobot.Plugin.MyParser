@@ -1,0 +1,42 @@
+using System.Diagnostics;
+using System.Net;
+using System.Text;
+using Net.Codecrete.QrCodeGenerator;
+using ShiroBot.AvaloniaSdk;
+using Shirobot.Plugin.MyParser.Parsing;
+using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
+using Shirobot.Plugin.MyParser.Utility;
+using ShiroBot.Model.Common;
+using ShiroBot.SDK.Abstractions;
+using ShiroBot.SDK.Core;
+using ShiroBot.SDK.Plugin;
+
+namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
+
+internal sealed partial class BilibiliMessageHandler
+{
+private string FormatBilibiliArticleResult(BilibiliArticleParseResult result)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(result.IsOpus ? "Bilibili 图文解析成功" : "Bilibili 专栏解析成功");
+        sb.AppendLine(result.IsOpus ? $"Opus：{result.OpusId}" : $"CV：cv{result.Cvid}");
+        if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"标题：{TrimLine(result.Title, 140)}");
+        if (!string.IsNullOrWhiteSpace(result.AuthorName)) sb.AppendLine($"作者：{result.AuthorName}");
+        if (result.PublishTime is not null) sb.AppendLine($"发布时间：{result.PublishTime:yyyy-MM-dd HH:mm}");
+        if (result.Words > 0) sb.AppendLine($"字数：{result.Words}");
+        if (result.Categories.Count > 0) sb.AppendLine($"分类：{string.Join(" / ", result.Categories)}");
+        if (!string.IsNullOrWhiteSpace(result.Summary)) sb.AppendLine($"摘要：{TrimLine(result.Summary, 220)}");
+        else if (!string.IsNullOrWhiteSpace(result.PlainText)) sb.AppendLine($"摘要：{TrimLine(result.PlainText, 220)}");
+        if (_config.IncludeCoverUrl && !string.IsNullOrWhiteSpace(result.BannerUrl)) sb.AppendLine($"封面：{result.BannerUrl}");
+        sb.AppendLine($"图片数：{result.ImageUrls.Count}");
+        sb.AppendLine($"数据：{FormatCount(result.ViewCount)}阅读 / {FormatCount(result.LikeCount)}赞 / {FormatCount(result.CoinCount)}投币 / {FormatCount(result.FavoriteCount)}收藏 / {FormatCount(result.ReplyCount)}评论");
+        if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");
+        return sb.ToString().TrimEnd();
+    }
+}

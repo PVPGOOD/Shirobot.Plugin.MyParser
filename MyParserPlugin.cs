@@ -1,5 +1,5 @@
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 using Shirobot.Plugin.MyParser.Providers.Douyin.Impl.MessageHandling;
 using Shirobot.Plugin.MyParser.Providers.Douyin.Facade;

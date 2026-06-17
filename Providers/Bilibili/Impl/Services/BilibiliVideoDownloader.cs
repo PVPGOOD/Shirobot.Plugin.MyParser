@@ -33,8 +33,11 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
         var audioPath = Path.Combine(workDir, "audio.m4s");
         var outputPath = Path.Combine(workDir, $"{title}.mp4");
 
-        await DownloadStreamAsync(video, videoPath, result, "视频流", cancellationToken);
-        await DownloadStreamAsync(audio, audioPath, result, "音频流", cancellationToken);
+        BotLog.Info($"MyParser Bilibili 音视频流并发下载开始: bvid={result.Bvid}, video={Path.GetFileName(videoPath)}, audio={Path.GetFileName(audioPath)}");
+        await Task.WhenAll(
+            DownloadStreamAsync(video, videoPath, result, "视频流", cancellationToken),
+            DownloadStreamAsync(audio, audioPath, result, "音频流", cancellationToken));
+        BotLog.Info($"MyParser Bilibili 音视频流并发下载完成，开始 ffmpeg 合并: bvid={result.Bvid}");
         await MuxAsync(ffmpeg, videoPath, audioPath, outputPath, cancellationToken);
         await ValidateMuxedVideoAsync(outputPath, cancellationToken);
 

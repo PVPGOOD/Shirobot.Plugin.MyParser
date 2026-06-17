@@ -1,0 +1,55 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag name, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  PROJECT_DIR: .
+  PUBLISH_DIR: bin/Release/net10.0/publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: dotnet publish "$PROJECT_DIR" --configuration Release
+
+      - name: Collect Plugin DLL
+        shell: bash
+        run: |
+          PROJECT="$(basename "$(ls *.csproj | head -1)" .csproj)"
+          PLUGIN_DLL="$PUBLISH_DIR/${PROJECT}.dll"
+          if [ ! -f "$PLUGIN_DLL" ]; then
+            echo "Plugin DLL not found: $PLUGIN_DLL"
+            ls -la "$PUBLISH_DIR"
+            exit 1
+          fi
+          mkdir -p release
+          cp "$PLUGIN_DLL" release/
+
+      - name: Upload DLL to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          files: release/*.dll

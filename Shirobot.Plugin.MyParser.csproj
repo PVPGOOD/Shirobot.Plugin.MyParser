@@ -2,84 +2,96 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
-        <AssemblyName>Shirobot.Plugin.MyParser</AssemblyName>
-        <RootNamespace>Shirobot.Plugin.MyParser</RootNamespace>
-        <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <Configurations>Debug;DebugPlugin;DebugAdapter;DebugAll;Release</Configurations>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)\.env')">
-        <_EnvText>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\.env'))</_EnvText>
-        <HostExe Condition="'$(HostExe)'==''">$([System.Text.RegularExpressions.Regex]::Match('$(_EnvText)', '(?m)^\s*HOST_EXE\s*=\s*(.*?)\s*$').Groups[1].Value)</HostExe>
-        <HostProjectRoot Condition="'$(HostProjectRoot)'==''">$([System.Text.RegularExpressions.Regex]::Match('$(_EnvText)', '(?m)^\s*HOST_PROJECT_ROOT\s*=\s*(.*?)\s*$').Groups[1].Value)</HostProjectRoot>
-    </PropertyGroup>
-
-    <PropertyGroup>
-        <HostExe Condition="'$(HostExe)'=='' and '$(HostProjectRoot)'!=''">$(HostProjectRoot)bin\Debug\$(TargetFramework)\ShiroBot.exe</HostExe>
-        <HostBaseDir Condition="'$(HostBaseDir)'=='' and '$(HostExe)'!=''">$([System.IO.Path]::GetDirectoryName('$(HostExe)'))\</HostBaseDir>
-        <HostPluginDir Condition="'$(HostPluginDir)'=='' and '$(HostBaseDir)'!=''">$(HostBaseDir)plugins\$(AssemblyName)\</HostPluginDir>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)'=='Debug' and '$(HostExe)'!=''">
-        <StartAction>Program</StartAction>
-        <StartProgram>$(HostExe)</StartProgram>
-        <StartWorkingDirectory>$([System.IO.Path]::GetDirectoryName('$(HostExe)'))</StartWorkingDirectory>
-        <RunCommand>$(HostExe)</RunCommand>
-        <RunWorkingDirectory>$([System.IO.Path]::GetDirectoryName('$(HostExe)'))</RunWorkingDirectory>
+        <!--        在此处配置你的宿主插件目录-->
+        <HostPluginDir>ShiroBot\plugins\$(AssemblyName)\</HostPluginDir>
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Update="Providers\Douyin\Views\DouyinCard.axaml.cs">
-            <DependentUpon>DouyinCard.axaml</DependentUpon>
-        </Compile>
-        <None Include="Providers\Douyin\Views\**\*.axaml" CopyToOutputDirectory="PreserveNewest" />
-        <None Include="Providers\Bilibili\Views\**\*.axaml" CopyToOutputDirectory="PreserveNewest" />
-        <None Include="Providers\Xiaohongshu\Views\**\*.axaml" CopyToOutputDirectory="PreserveNewest" />
-    </ItemGroup>
-
-    <ItemGroup>
-        <PackageReference Include="ShiroBot.SDK" Version="0.5.0" />
-        <PackageReference Include="ShiroBot.AvaloniaSdk" Version="0.5.0" />
-        <PackageReference Include="Avalonia" Version="12.0.4">
-            <ExcludeAssets>runtime</ExcludeAssets>
-            <PrivateAssets>none</PrivateAssets>
-            <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-        <PackageReference Include="Net.Codecrete.QrCodeGenerator" Version="2.1.0" />
+        <PackageReference Include="ShiroBot.AvaloniaSdk" Version="0.6.0" />
         <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.44.1">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
+        <PackageReference Include="Net.Codecrete.QrCodeGenerator" Version="2.1.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include=".github\workflows\release.yml" />
     </ItemGroup>
 
     <Target Name="RepackPlugin" AfterTargets="Publish" Condition="'$(Configuration)'=='Release'">
         <PropertyGroup>
             <MergedPluginFile>$(PublishDir)$(AssemblyName).merged.dll</MergedPluginFile>
+            <MergedPluginPdb>$(PublishDir)$(AssemblyName).merged.pdb</MergedPluginPdb>
+            <PublishedPluginFile>$(PublishDir)$(AssemblyName).dll</PublishedPluginFile>
+            <PublishedPluginPdb>$(PublishDir)$(AssemblyName).pdb</PublishedPluginPdb>
         </PropertyGroup>
 
+        <Delete Files="$(MergedPluginFile);$(MergedPluginPdb)" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(PublishedPluginFile)" OverwriteReadOnlyFiles="true" />
+        <Copy SourceFiles="$(TargetDir)$(AssemblyName).pdb" DestinationFiles="$(PublishedPluginPdb)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
+
         <ItemGroup>
-            <RepackInput Include="$(PublishDir)$(AssemblyName).dll" />
-            <RepackDependency Include="$(PublishDir)*.dll" Exclude="$(PublishDir)$(AssemblyName).dll;&#xA;                                       $(PublishDir)ShiroBot.SDK.dll;&#xA;                                       $(PublishDir)ShiroBot.Model.dll;&#xA;                                       $(PublishDir)ShiroBot.AvaloniaSdk.dll;&#xA;                                       $(PublishDir)Microsoft*.dll;&#xA;                                       $(PublishDir)System*.dll;&#xA;                                       $(PublishDir)mscorlib.dll;&#xA;                                       $(PublishDir)netstandard.dll" />
+            <RepackInput Include="$(PublishedPluginFile)" />
+            <RepackDependency Include="$(PublishDir)*.dll"
+                              Exclude="$(PublishedPluginFile);
+                                        $(MergedPluginFile);
+                                        $(PublishDir)Avalonia*.dll;
+                                        $(PublishDir)HarfBuzzSharp.dll;
+                                        $(PublishDir)MicroCom.Runtime.dll;
+                                        $(PublishDir)SkiaSharp.dll;
+                                        $(PublishDir)ShiroBot.AvaloniaSdk.dll;
+                                        $(PublishDir)ShiroBot.SDK.dll;
+                                        $(PublishDir)ShiroBot.Model.dll;
+                                        $(PublishDir)System*.dll;
+                                       $(PublishDir)mscorlib.dll;
+                                       $(PublishDir)netstandard.dll" />
             <RepackInput Include="@(RepackDependency)" />
         </ItemGroup>
 
-        <ILRepack TargetKind="Dll" OutputFile="$(MergedPluginFile)" InputAssemblies="@(RepackInput)" LibraryPath="$(PublishDir)" Internalize="true" Parallel="true" DebugInfo="true" />
+        <ILRepack
+                TargetKind="Dll"
+                OutputFile="$(MergedPluginFile)"
+                InputAssemblies="@(RepackInput)"
+                LibraryPath="$(PublishDir);$(TargetDir);@(ReferencePath->'%(RootDir)%(Directory)')"
+                Internalize="false"
+                Parallel="true"
+                DebugInfo="true" />
 
         <Copy SourceFiles="$(MergedPluginFile)" DestinationFiles="$(PublishDir)$(AssemblyName).dll" OverwriteReadOnlyFiles="true" />
+        <Copy SourceFiles="$(MergedPluginPdb)" DestinationFiles="$(PublishedPluginPdb)" OverwriteReadOnlyFiles="true" Condition="Exists('$(MergedPluginPdb)')" />
         <Delete Files="$(MergedPluginFile)" />
+        <Delete Files="$(MergedPluginPdb)" />
         <Delete Files="@(RepackDependency)" />
+
+        <ItemGroup>
+            <PublishHostProvidedOutput Include="$(PublishDir)Avalonia*.dll;$(PublishDir)Avalonia*.pdb;$(PublishDir)HarfBuzzSharp.dll;$(PublishDir)HarfBuzzSharp.pdb;$(PublishDir)MicroCom.Runtime.dll;$(PublishDir)MicroCom.Runtime.pdb;$(PublishDir)SkiaSharp.dll;$(PublishDir)SkiaSharp.pdb;$(PublishDir)ShiroBot.AvaloniaSdk.dll;$(PublishDir)ShiroBot.AvaloniaSdk.pdb;$(PublishDir)ShiroBot.SDK.dll;$(PublishDir)ShiroBot.SDK.pdb;$(PublishDir)ShiroBot.Model.dll;$(PublishDir)ShiroBot.Model.pdb" />
+        </ItemGroup>
+
+        <Delete Files="@(PublishHostProvidedOutput)" />
+        <RemoveDir Directories="$(PublishDir)runtimes" />
     </Target>
 
-    <Target Name="CopyPluginToHost" AfterTargets="Build" Condition="'$(HostPluginDir)'!='' and ('$(Configuration)'=='Debug' or '$(Configuration)'=='DebugPlugin' or '$(Configuration)'=='DebugAll')">
+    <Target Name="CopyPluginToHost"
+            AfterTargets="Build"
+            Condition="'$(Configuration)'=='Debug'">
         <MakeDir Directories="$(HostPluginDir)" />
 
         <ItemGroup>
-            <PluginDebugOutput Include="$(TargetDir)**\*" Exclude="$(TargetDir)ShiroBot.SDK.dll;$(TargetDir)ShiroBot.SDK.pdb;$(TargetDir)ShiroBot.Model.dll;$(TargetDir)ShiroBot.Model.pdb;$(TargetDir)ShiroBot.AvaloniaSdk.dll;$(TargetDir)ShiroBot.AvaloniaSdk.pdb" />
+            <PluginDebugOutput Include="$(TargetDir)**\*"
+                               Exclude="$(TargetDir)Avalonia*.dll;$(TargetDir)Avalonia*.pdb;$(TargetDir)HarfBuzzSharp.dll;$(TargetDir)HarfBuzzSharp.pdb;$(TargetDir)MicroCom.Runtime.dll;$(TargetDir)MicroCom.Runtime.pdb;$(TargetDir)SkiaSharp.dll;$(TargetDir)SkiaSharp.pdb;$(TargetDir)runtimes\**\*;$(TargetDir)$(AssemblyName).exe;$(TargetDir)$(AssemblyName).runtimeconfig.json;$(TargetDir)ShiroBot.AvaloniaSdk.dll;$(TargetDir)ShiroBot.AvaloniaSdk.pdb;$(TargetDir)ShiroBot.SDK.dll;$(TargetDir)ShiroBot.SDK.pdb;$(TargetDir)ShiroBot.Model.dll;$(TargetDir)ShiroBot.Model.pdb" />
+            <PluginPreviewOnlyOutput Include="$(HostPluginDir)Avalonia*.dll;$(HostPluginDir)Avalonia*.pdb;$(HostPluginDir)HarfBuzzSharp.dll;$(HostPluginDir)HarfBuzzSharp.pdb;$(HostPluginDir)MicroCom.Runtime.dll;$(HostPluginDir)MicroCom.Runtime.pdb;$(HostPluginDir)SkiaSharp.dll;$(HostPluginDir)SkiaSharp.pdb;$(HostPluginDir)$(AssemblyName).exe;$(HostPluginDir)$(AssemblyName).runtimeconfig.json;$(HostPluginDir)runtimes\**\*" />
         </ItemGroup>
 
-        <Copy SourceFiles="@(PluginDebugOutput)" DestinationFiles="@(PluginDebugOutput->'$(HostPluginDir)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+        <Delete Files="@(PluginPreviewOnlyOutput)" />
+        <RemoveDir Directories="$(HostPluginDir)runtimes" />
+
+        <Copy SourceFiles="@(PluginDebugOutput)"
+              DestinationFiles="@(PluginDebugOutput->'$(HostPluginDir)%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
     </Target>
 
 </Project>

@@ -17,8 +17,10 @@ namespace Shirobot.Plugin.MyParser;
 [BotPlugin(id: "MyParser",
     Name = "MyParser",
     Version = "0.1.0",
+    Author = "PVPGood",
+    Category = PluginCategory.Utility,
     Description = "面向 Shirobot 的学习型内容消息处理插件。",
-    GithubRepo = "https://github.com/PVPGOOD/Shirobot.Plugin.MyParser/",
+    GithubRepo = "PVPGOOD/Shirobot.Plugin.MyParser/",
     IsPluginSingleFile = false)
 ]
 public sealed class MyParserPlugin : PluginBase

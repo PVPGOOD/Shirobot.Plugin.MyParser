@@ -6,8 +6,13 @@ using Shirobot.Plugin.MyParser.Providers.Douyin.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Impl.MessageHandling;
 using System.Text;
+using ShiroBot.AvaloniaSdk;
 using Shirobot.Plugin.MyParser.Parsing;
 using ShiroBot.Model.Common;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
+using Shirobot.Plugin.MyParser.Providers.Douyin.ViewModels;
+using Shirobot.Plugin.MyParser.Providers.Douyin.Views;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Core;
 using ShiroBot.SDK.Plugin;
@@ -72,6 +77,24 @@ public sealed class MyParserPlugin : PluginBase
             await LogXiaohongshuCookieLoginStatusAsync();
         }
 
+        // GroupCommands.MapExact("b", async message =>
+        // {
+        //     BotLog.Error("MyParser 错误日志测试");
+        //     var text = GetPlainText(message);
+        //     var pic = await Context.RenderControlPngAsync<BiliCard>(new BiliCardViewModel(),
+        //         new ControlRenderOptions(RenderTheme.Light,192));
+        //     await Context.Message.ReplyAsync(message, $"b卡",new ImageOutgoingSegment($"base64://{Convert.ToBase64String(pic)}"));
+        // });
+        //
+        // GroupCommands.MapExact("d", async message =>
+        // {
+        //     BotLog.Error("MyParser 错误日志测试");
+        //     var text = GetPlainText(message);
+        //     var pic = await Context.RenderControlPngAsync<DouyinCard>(new DouyinCardViewModel(),
+        //         new ControlRenderOptions(RenderTheme.Light));
+        //     await Context.Message.ReplyAsync(message, $"dycard",new ImageOutgoingSegment($"base64://{Convert.ToBase64String(pic)}"));
+        // });
+        //
         FriendCommands.MapExact("#parser", HandleHelpAsync);
         GroupCommands.MapExact("#parser", HandleHelpAsync);
         FriendCommands.MapExact(_config.BilibiliLoginCommand, HandleBilibiliLoginAsync);

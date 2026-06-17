@@ -82,7 +82,7 @@
             <Border VerticalAlignment="Top" Height="128" IsHitTestVisible="False" Background="{DynamicResource TopScrim}" />
             <Border VerticalAlignment="Bottom" Height="420" IsHitTestVisible="False" Background="{DynamicResource BottomScrim}" />
 
-            <Grid VerticalAlignment="Top" Height="80" Margin="16,20,16,0">
+            <Grid VerticalAlignment="Top" Height="80" Margin="16,0,16,0">
                 <Border Background="{DynamicResource CardButtonBackground}"
                         BorderBrush="{DynamicResource CardButtonBorder}"
                         BorderThickness="1"

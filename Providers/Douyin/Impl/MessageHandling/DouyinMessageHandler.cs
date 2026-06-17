@@ -334,20 +334,31 @@ private void LogFinalVideoFileInfo(DouyinParseResult result)
             {
                 var response = await _context.Message.SendGroupMessageAsync(group.Group.GroupId, segments);
                 BotLog.Info($"MyParser VideoSegment 发送接口完成: aweme_id={result.AwemeId}, scene=group, group_id={group.Group.GroupId}, message_seq={response.MessageSeq}, time={response.Time}, elapsed={stopwatch.Elapsed:mm\\:ss}");
+                EnsureVideoSendAccepted(response.MessageSeq, "group");
                 break;
             }
             case FriendIncomingMessage friend:
             {
                 var response = await _context.Message.SendPrivateMessageAsync(friend.SenderId, segments);
                 BotLog.Info($"MyParser VideoSegment 发送接口完成: aweme_id={result.AwemeId}, scene=friend, user_id={friend.SenderId}, message_seq={response.MessageSeq}, time={response.Time}, elapsed={stopwatch.Elapsed:mm\\:ss}");
+                EnsureVideoSendAccepted(response.MessageSeq, "friend");
                 break;
             }
             default:
             {
                 var response = await _context.Message.ReplyAsync(message, segments);
                 BotLog.Info($"MyParser VideoSegment 发送接口完成: aweme_id={result.AwemeId}, scene=reply, message_seq={response.MessageSeq}, time={response.Time}, elapsed={stopwatch.Elapsed:mm\\:ss}");
+                EnsureVideoSendAccepted(response.MessageSeq, "reply");
                 break;
             }
+        }
+    }
+
+    private void EnsureVideoSendAccepted(long messageSeq, string scene)
+    {
+        if (_config.TreatZeroMessageSeqAsVideoSendFailure && messageSeq <= 0)
+        {
+            throw new InvalidOperationException($"VideoSegment 发送返回 message_seq={messageSeq}，可能被适配器或平台拒绝，按发送失败处理以触发文件上传 fallback。scene={scene}");
         }
     }
 

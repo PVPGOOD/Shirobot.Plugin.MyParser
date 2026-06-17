@@ -88,37 +88,29 @@ internal sealed class BilibiliMessageHandler : IDisposable
                     BotLog.Info($"MyParser Bilibili 文件上传完成: bvid={result.Bvid}, {fileUploadInfo}");
                 }
 
-                if (!result.LocalVideoRegisteredToHttpServer)
-                {
-                    LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "bilibili");
-                }
+                CleanupLocalVideoAfterSend(result);
                 await TryReactToSourceMessageAsync(message, "426");
                 return;
             }
             catch (Exception ex)
             {
                 videoSendError = ex.Message;
-                BotLog.Warning($"MyParser Bilibili 视频消息发送失败: bvid={result.Bvid}, error={ex.Message}");
+                BotLog.Warning($"MyParser Bilibili VideoSegment 发送未确认: bvid={result.Bvid}, detail={ex.Message}");
                 if (_config.UploadVideoAsFile && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
                 {
                     try
                     {
                         fileUploadInfo = await UploadVideoFileAsync(message, result);
                         fileUploaded = true;
-                        BotLog.Info($"MyParser Bilibili VideoSegment 失败后文件上传完成: bvid={result.Bvid}, {fileUploadInfo}");
-                        if (result.LocalVideoRegisteredToHttpServer)
-                        {
-                            _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
-                        }
-
-                        LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "bilibili");
+                        BotLog.Info($"MyParser Bilibili VideoSegment 未确认后文件上传完成: bvid={result.Bvid}, {fileUploadInfo}");
+                        CleanupLocalVideoAfterSend(result);
                         await TryReactToSourceMessageAsync(message, "426");
                         return;
                     }
                     catch (Exception uploadEx)
                     {
                         fileUploadInfo = uploadEx.Message;
-                        BotLog.Warning($"MyParser Bilibili VideoSegment 失败后文件上传也失败: bvid={result.Bvid}, error={uploadEx.Message}");
+                        BotLog.Warning($"MyParser Bilibili VideoSegment 未确认，文件上传也未完成: bvid={result.Bvid}, detail={uploadEx.Message}");
                     }
                 }
             }
@@ -134,12 +126,12 @@ internal sealed class BilibiliMessageHandler : IDisposable
         catch (BilibiliParseException ex)
         {
             await TryReactToSourceMessageAsync(message, "379");
-            await ReplyAsync(message, "Bilibili 解析失败：" + ex.Message);
+            await ReplyAsync(message, "Bilibili 解析未完成：" + ex.Message);
         }
         catch (TaskCanceledException)
         {
             await TryReactToSourceMessageAsync(message, "379");
-            await ReplyAsync(message, "Bilibili 解析超时，请稍后重试。若经常失败，请检查 BilibiliCookie/网络/ffmpeg。");
+            await ReplyAsync(message, "Bilibili 解析超时，请稍后再试。若经常超时，请检查 BilibiliCookie/网络/ffmpeg。");
         }
         catch (Exception ex)
         {
@@ -265,12 +257,14 @@ internal sealed class BilibiliMessageHandler : IDisposable
             {
                 var response = await _context.Message.SendGroupMessageAsync(group.Group.GroupId, segments);
                 BotLog.Info($"MyParser Bilibili VideoSegment 发送接口完成: bvid={result.Bvid}, scene=group, group_id={group.Group.GroupId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
+                EnsureVideoSendAccepted(response.MessageSeq, "group");
                 break;
             }
             case FriendIncomingMessage friend:
             {
                 var response = await _context.Message.SendPrivateMessageAsync(friend.SenderId, segments);
                 BotLog.Info($"MyParser Bilibili VideoSegment 发送接口完成: bvid={result.Bvid}, scene=friend, user_id={friend.SenderId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
+                EnsureVideoSendAccepted(response.MessageSeq, "friend");
                 break;
             }
             default:
@@ -279,6 +273,25 @@ internal sealed class BilibiliMessageHandler : IDisposable
                 break;
             }
         }
+    }
+
+    private void EnsureVideoSendAccepted(long messageSeq, string scene)
+    {
+        if (_config.TreatZeroMessageSeqAsVideoSendFailure && messageSeq <= 0)
+        {
+            throw new InvalidOperationException($"VideoSegment 发送返回 message_seq={messageSeq}，未取得有效消息序号，改为文件上传。scene={scene}");
+        }
+    }
+
+    private void CleanupLocalVideoAfterSend(BilibiliParseResult result)
+    {
+        if (result.LocalVideoRegisteredToHttpServer)
+        {
+            _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
+            result.LocalVideoRegisteredToHttpServer = false;
+        }
+
+        LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "bilibili");
     }
 
     private async Task SendQrImageAsync(IncomingMessage message, string text, string fileName)
@@ -962,12 +975,12 @@ private static string GetArticleKindText(BilibiliArticleParseResult result) => r
         var videoStatus = videoSent
             ? "视频：已下载音视频流、ffmpeg 合并，并已调用 VideoSegment 发送接口"
             : videoDownloadAttempted
-                ? $"视频：下载/合并/发送失败；原因：{TrimLine(videoSendError ?? "未知错误", 100)}"
+                ? $"视频：下载/合并/发送未完成；原因：{TrimLine(videoSendError ?? "未知错误", 100)}"
                 : "视频：已解析，未下载发送";
         sb.AppendLine(videoStatus);
         if (_config.UploadVideoAsFile)
         {
-            sb.AppendLine(fileUploaded ? $"文件上传：已上传为{fileUploadInfo}" : $"文件上传：失败或未执行；原因：{TrimLine(fileUploadInfo ?? "未知", 80)}");
+            sb.AppendLine(fileUploaded ? $"文件上传：已上传为{fileUploadInfo}" : $"文件上传：未执行或未完成；原因：{TrimLine(fileUploadInfo ?? "未知", 80)}");
         }
 
         if (_config.IncludeLocalFilePath && !string.IsNullOrWhiteSpace(result.LocalVideoPath))

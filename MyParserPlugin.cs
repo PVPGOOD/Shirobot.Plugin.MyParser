@@ -317,24 +317,22 @@ public sealed class MyParserPlugin : PluginBase
     private bool ShouldAutoParse(IncomingMessage message)
     {
         var text = GetPlainText(message);
-        if (string.IsNullOrWhiteSpace(text))
+        if (!string.IsNullOrWhiteSpace(text))
         {
-            return false;
+            var trimmed = text.TrimStart();
+            if (trimmed.StartsWith(_config.ParseCommandPrefix, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith("#parser", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(_config.BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(_config.XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(_config.DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(_config.BilibiliCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(_config.XiaohongshuCookieCheckCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
         }
 
-        var trimmed = text.TrimStart();
-        if (trimmed.StartsWith(_config.ParseCommandPrefix, StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("#parser", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith(_config.BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith(_config.XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith(_config.DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith(_config.BilibiliCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith(_config.XiaohongshuCookieCheckCommand, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var provider = _providerRegistry?.FindProvider(text);
+        var provider = _providerRegistry?.FindProvider(message, out _);
         return provider?.Id switch
         {
             "douyin" => _config.AutoParseDouyinLinks,
@@ -347,7 +345,9 @@ public sealed class MyParserPlugin : PluginBase
 
     private Task HandleAutoParseAsync(IncomingMessage message)
     {
-        return DispatchParseAsync(message, GetPlainText(message));
+        return _providerRegistry?.FindProvider(message, out var parseText) is not null && !string.IsNullOrWhiteSpace(parseText)
+            ? DispatchParseAsync(message, parseText)
+            : Task.CompletedTask;
     }
 
     private Task HandleParseCommandAsync(IncomingMessage message)

@@ -94,6 +94,8 @@ public sealed class MyParserConfig
 
     public bool UploadVideoAsFileOnlyOnVideoSendFailure { get; set; } = true;
 
+    public bool TreatZeroMessageSeqAsVideoSendFailure { get; set; } = true;
+
     public bool UseLocalHttpServerForLargeVideoSegment { get; set; } = true;
 
     public string LocalVideoHttpHost { get; set; } = "127.0.0.1";

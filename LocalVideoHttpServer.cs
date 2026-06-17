@@ -199,7 +199,10 @@ internal sealed class LocalVideoHttpServer : IDisposable
         }
         catch (Exception ex) when (!_cts.IsCancellationRequested)
         {
-            BotLog.Warning($"MyParser 本地视频 HTTP 处理请求失败: {ex.Message}");
+            if (!IsBenignClientDisconnect(ex))
+            {
+                BotLog.Warning($"MyParser 本地视频 HTTP 处理请求失败: {ex.Message}");
+            }
         }
         finally
         {
@@ -208,6 +211,28 @@ internal sealed class LocalVideoHttpServer : IDisposable
                 _clientSlots.Release();
             }
         }
+    }
+
+    private static bool IsBenignClientDisconnect(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is IOException || current is SocketException)
+            {
+                var message = current.Message;
+                if (message.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("connection was aborted", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("broken pipe", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("远程主机强迫关闭", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("连接被中止", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("管道", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private bool IsAllowedRemoteEndpoint(EndPoint? remoteEndPoint)

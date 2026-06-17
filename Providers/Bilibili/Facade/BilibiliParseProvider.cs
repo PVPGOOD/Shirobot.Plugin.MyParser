@@ -1,9 +1,11 @@
 using Shirobot.Plugin.MyParser.Parsing;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
+using ShiroBot.Model.Common;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
 
-internal sealed class BilibiliParseProvider(BilibiliParser parser) : IParseProvider, IDisposable
+internal sealed class BilibiliParseProvider(BilibiliParser parser) : IIncomingMessageParseProvider, IDisposable
 {
     public BilibiliParser Parser { get; } = parser;
 
@@ -14,6 +16,11 @@ internal sealed class BilibiliParseProvider(BilibiliParser parser) : IParseProvi
     {
         return Utilities.BilibiliUrlParser.ExtractBvid(text) is not null
                || Utilities.BilibiliUrlParser.ExtractB23Url(text) is not null;
+    }
+
+    public string? ExtractParseText(IncomingMessage message)
+    {
+        return BilibiliLightAppUrlExtractor.ExtractParseText(message);
     }
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)

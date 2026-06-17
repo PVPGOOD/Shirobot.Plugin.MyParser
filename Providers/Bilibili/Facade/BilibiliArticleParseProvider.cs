@@ -12,7 +12,8 @@ internal sealed class BilibiliArticleParseProvider(BilibiliParser parser) : IPar
     public bool CanHandle(string text)
     {
         return Utilities.BilibiliUrlParser.ExtractCvid(text) is not null
-               || Utilities.BilibiliUrlParser.ExtractOpusId(text) is not null;
+               || Utilities.BilibiliUrlParser.ExtractOpusId(text) is not null
+               || Utilities.BilibiliUrlParser.ExtractB23Url(text) is not null;
     }
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)

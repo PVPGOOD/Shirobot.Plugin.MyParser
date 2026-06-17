@@ -1,5 +1,6 @@
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 using Shirobot.Plugin.MyParser.Providers.Douyin.Impl.MessageHandling;
 using Shirobot.Plugin.MyParser.Providers.Douyin.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Facade;
@@ -26,6 +27,7 @@ public sealed class MyParserPlugin : PluginBase
     private DouyinParseProvider? _douyinProvider;
     private BilibiliParseProvider? _bilibiliProvider;
     private BilibiliArticleParseProvider? _bilibiliArticleProvider;
+    private BilibiliLiveParseProvider? _bilibiliLiveProvider;
     private XiaohongshuParseProvider? _xiaohongshuProvider;
     private ParseProviderRegistry? _providerRegistry;
     private DouyinMessageHandler? _douyinMessageHandler;
@@ -45,8 +47,9 @@ public sealed class MyParserPlugin : PluginBase
         var bilibiliParser = new BilibiliParser(_config);
         _bilibiliProvider = new BilibiliParseProvider(bilibiliParser);
         _bilibiliArticleProvider = new BilibiliArticleParseProvider(bilibiliParser);
+        _bilibiliLiveProvider = new BilibiliLiveParseProvider(new BilibiliLiveParser(bilibiliParser.HttpClient, _config));
         _xiaohongshuProvider = new XiaohongshuParseProvider(new XiaohongshuParser(_config));
-        _providerRegistry = new ParseProviderRegistry([_xiaohongshuProvider, _douyinProvider, _bilibiliArticleProvider, _bilibiliProvider]);
+        _providerRegistry = new ParseProviderRegistry([_xiaohongshuProvider, _douyinProvider, _bilibiliArticleProvider, _bilibiliLiveProvider, _bilibiliProvider]);
         _douyinMessageHandler = new DouyinMessageHandler(Context, _config, _providerRegistry, _douyinProvider);
         _bilibiliMessageHandler = new BilibiliMessageHandler(Context, _config, _providerRegistry, _bilibiliProvider);
         _xiaohongshuMessageHandler = new XiaohongshuMessageHandler(Context, _config, _providerRegistry, _xiaohongshuProvider);
@@ -322,6 +325,7 @@ public sealed class MyParserPlugin : PluginBase
             var trimmed = text.TrimStart();
             if (trimmed.StartsWith(_config.ParseCommandPrefix, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith("#parser", StringComparison.OrdinalIgnoreCase)
+                || IsPluginResultMessage(trimmed)
                 || trimmed.StartsWith(_config.BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith(_config.XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith(_config.DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
@@ -338,6 +342,7 @@ public sealed class MyParserPlugin : PluginBase
             "douyin" => _config.AutoParseDouyinLinks,
             "bilibili" => _config.AutoParseBilibiliLinks,
             "bilibili-article" => _config.AutoParseBilibiliLinks,
+            "bilibili-live" => _config.AutoParseBilibiliLinks,
             "xiaohongshu" => _config.AutoParseXiaohongshuLinks,
             _ => false,
         };
@@ -488,6 +493,18 @@ public sealed class MyParserPlugin : PluginBase
         }
     }
 
+    private static bool IsPluginResultMessage(string text)
+    {
+        return text.StartsWith("Bilibili 视频解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("Bilibili 直播解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("Bilibili 图文解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("Bilibili 专栏解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("Douyin 解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("抖音解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("小红书解析", StringComparison.OrdinalIgnoreCase)
+               || text.StartsWith("Xiaohongshu", StringComparison.OrdinalIgnoreCase);
+    }
+
     private Task DispatchParseAsync(IncomingMessage message, string text)
     {
         var provider = _providerRegistry?.FindProvider(text);
@@ -496,6 +513,7 @@ public sealed class MyParserPlugin : PluginBase
             "douyin" => _douyinMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "bilibili" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "bilibili-article" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
+            "bilibili-live" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "xiaohongshu" => _xiaohongshuMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             _ => Context.Message.ReplyAsync(message, "未找到可处理该链接的解析提供商。"),
         };

@@ -34,9 +34,42 @@ internal sealed class ParseProviderRegistry(IEnumerable<IParseProvider> provider
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)
     {
-        var provider = FindProvider(text)
-            ?? throw new InvalidOperationException("未找到可处理该链接的解析提供商。");
-        return await provider.ParseAsync(text, cancellationToken);
+        var candidates = _providers.Where(provider => provider.CanHandle(text)).ToArray();
+        if (candidates.Length == 0)
+        {
+            throw new InvalidOperationException("未找到可处理该链接的解析提供商。");
+        }
+
+        Exception? lastError = null;
+        foreach (var provider in candidates)
+        {
+            try
+            {
+                return await provider.ParseAsync(text, cancellationToken);
+            }
+            catch (Exception ex) when (candidates.Length > 1 && IsProviderMismatch(ex))
+            {
+                lastError = ex;
+            }
+        }
+
+        if (lastError is not null)
+        {
+            throw lastError;
+        }
+
+        throw new InvalidOperationException("未找到可处理该链接的解析提供商。");
+    }
+
+    private static bool IsProviderMismatch(Exception ex)
+    {
+        var message = ex.Message;
+        return message.Contains("短链接跳转后未找到", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("无法从输入中提取", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是视频", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是专栏", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是图文", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是动态", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetPlainText(IncomingMessage message)

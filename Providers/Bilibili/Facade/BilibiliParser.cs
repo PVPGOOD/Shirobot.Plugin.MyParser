@@ -41,6 +41,8 @@ internal sealed class BilibiliParser : IDisposable
     private readonly MyParserConfig _config;
     private readonly BilibiliVideoDownloader _videoDownloader;
     private readonly BilibiliArticleParser _articleParser;
+
+    internal HttpClient HttpClient => _http;
     private string? _mixinKey;
     private DateTimeOffset _mixinKeyExpiresAt;
 
@@ -221,7 +223,29 @@ internal sealed class BilibiliParser : IDisposable
 
         var shortUrl = BilibiliUrlParser.ExtractB23Url(text)
                        ?? throw new BilibiliParseException("无法从输入中提取 BV 号或 b23.tv 短链接。");
-        using var request = new HttpRequestMessage(HttpMethod.Get, shortUrl);
+        var finalUrl = await ResolveBilibiliRedirectUrlAsync(shortUrl, cancellationToken);
+        bvid = BilibiliUrlParser.ExtractBvid(finalUrl);
+        if (bvid is not null)
+        {
+            return bvid;
+        }
+
+        if (BilibiliUrlParser.ExtractCvid(finalUrl) is not null || BilibiliUrlParser.ExtractOpusId(finalUrl) is not null)
+        {
+            throw new BilibiliParseException($"b23.tv 短链接跳转到专栏/图文动态，不是视频：{finalUrl}");
+        }
+
+        if (BilibiliUrlParser.ExtractLiveRoomId(finalUrl) is not null)
+        {
+            throw new BilibiliParseException($"b23.tv 短链接跳转到直播间，不是视频：{finalUrl}");
+        }
+
+        throw new BilibiliParseException($"b23.tv 短链接跳转后未找到 BV 号：{finalUrl}");
+    }
+
+    internal async Task<string> ResolveBilibiliRedirectUrlAsync(string url, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
         request.Headers.TryAddWithoutValidation("Referer", BilibiliConstants.Origin + "/");
         request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
@@ -231,23 +255,12 @@ internal sealed class BilibiliParser : IDisposable
         }
 
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? string.Empty;
-        bvid = BilibiliUrlParser.ExtractBvid(finalUrl);
-        if (bvid is not null)
+        if (response.RequestMessage?.RequestUri is { } requestUri)
         {
-            return bvid;
+            return requestUri.ToString();
         }
 
-        if (response.Headers.Location is not null)
-        {
-            bvid = BilibiliUrlParser.ExtractBvid(response.Headers.Location.ToString());
-            if (bvid is not null)
-            {
-                return bvid;
-            }
-        }
-
-        throw new BilibiliParseException($"b23.tv 短链接跳转后未找到 BV 号：{finalUrl}");
+        return response.Headers.Location?.ToString() ?? url;
     }
 
     private async Task<JsonElement> GetViewAsync(string bvid, CancellationToken cancellationToken)

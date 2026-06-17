@@ -106,6 +106,14 @@ public sealed class MyParserConfig
 
     public bool AllowLanAccessToLocalVideoHttpServer { get; set; } = false;
 
+    public bool SendBilibiliLiveReplayClip { get; set; } = true;
+
+    public int BilibiliLiveReplayClipSeconds { get; set; } = 12;
+
+    public int BilibiliLiveReplayClipMaxMegabytes { get; set; } = 256;
+
+    public int BilibiliLiveReplayClipFfmpegTimeoutSeconds { get; set; } = 240;
+
     public bool DeleteLocalVideoAfterSend { get; set; } = true;
 
     public bool UploadVideoAsBase64 { get; set; } = true;

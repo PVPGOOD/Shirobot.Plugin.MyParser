@@ -376,21 +376,12 @@ internal sealed partial class BilibiliArticleParser(HttpClient http, MyParserCon
 
     private async Task<(long? Cvid, string? OpusId)> ResolveArticleIdFromShortUrlAsync(string shortUrl, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, shortUrl);
-        ApplyHeaders(request, BilibiliConstants.Origin + "/");
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? string.Empty;
+        var finalUrl = await new BilibiliParser(config, http).ResolveBilibiliRedirectUrlAsync(shortUrl, cancellationToken);
         var cvid = BilibiliUrlParser.ExtractCvid(finalUrl);
         var opusId = BilibiliUrlParser.ExtractOpusId(finalUrl);
         if (cvid is not null || opusId is not null)
         {
             return (cvid, opusId);
-        }
-
-        if (response.Headers.Location is not null)
-        {
-            var location = response.Headers.Location.ToString();
-            return (BilibiliUrlParser.ExtractCvid(location), BilibiliUrlParser.ExtractOpusId(location));
         }
 
         return (null, null);

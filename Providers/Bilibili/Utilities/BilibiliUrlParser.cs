@@ -6,7 +6,7 @@ internal static partial class BilibiliUrlParser
 {
     public static bool ContainsBilibiliUrl(string text)
     {
-        return ExtractBvid(text) is not null || ExtractCvid(text) is not null || ExtractOpusId(text) is not null || ExtractB23Url(text) is not null;
+        return ExtractBvid(text) is not null || ExtractCvid(text) is not null || ExtractOpusId(text) is not null || ExtractLiveRoomId(text) is not null || ExtractB23Url(text) is not null;
     }
 
     public static string? ExtractBvid(string text)
@@ -47,6 +47,17 @@ internal static partial class BilibiliUrlParser
         return match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
     }
 
+    public static string? ExtractLiveRoomId(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var match = LiveRoomRegex().Match(text);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
     public static string? ExtractB23Url(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -83,6 +94,9 @@ internal static partial class BilibiliUrlParser
 
     [GeneratedRegex(@"/opus/(\d+)|\bopus(\d+)\b", RegexOptions.IgnoreCase)]
     private static partial Regex OpusRegex();
+
+    [GeneratedRegex(@"live\.bilibili\.com/(?:blanc/)?(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex LiveRoomRegex();
 
     [GeneratedRegex(@"(?:https?://)?b23\.tv/[0-9A-Za-z]+", RegexOptions.IgnoreCase)]
     private static partial Regex B23UrlRegex();

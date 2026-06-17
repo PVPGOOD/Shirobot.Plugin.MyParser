@@ -1,12 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <Import Project="Directory.Build.local.props" Condition="Exists('Directory.Build.local.props')" />
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <!--        在此处配置你的宿主插件目录-->
-        <HostPluginDir>ShiroBot\plugins\$(AssemblyName)\</HostPluginDir>
+        <!-- 本地调试输出目录：Rider 运行配置可从 .env 注入 HOST_PLUGIN_DIR 环境变量。 -->
+        <HostPluginDir Condition="'$(HostPluginDir)'=='' And '$(HOST_PLUGIN_DIR)'!=''">$(HOST_PLUGIN_DIR)</HostPluginDir>
+        <HostPluginDir Condition="'$(HostPluginDir)'==''"></HostPluginDir>
+        <AppendTargetFrameworkToOutputPath Condition="'$(Configuration)'=='Debug' And '$(HostPluginDir)'!=''">false</AppendTargetFrameworkToOutputPath>
+        <OutputPath Condition="'$(Configuration)'=='Debug' And '$(HostPluginDir)'!=''">$(HostPluginDir)</OutputPath>
     </PropertyGroup>
 
     <ItemGroup>
@@ -21,6 +26,15 @@
     <ItemGroup>
       <Content Include=".github\workflows\release.yml" />
     </ItemGroup>
+
+    <Target Name="CleanHostProvidedDebugOutput" AfterTargets="Build" Condition="'$(Configuration)'=='Debug' And '$(HostPluginDir)'!=''">
+        <ItemGroup>
+            <HostProvidedDebugOutput Include="$(TargetDir)Avalonia*.dll;$(TargetDir)Avalonia*.pdb;$(TargetDir)HarfBuzzSharp.dll;$(TargetDir)HarfBuzzSharp.pdb;$(TargetDir)MicroCom.Runtime.dll;$(TargetDir)MicroCom.Runtime.pdb;$(TargetDir)SkiaSharp.dll;$(TargetDir)SkiaSharp.pdb;$(TargetDir)ShiroBot.AvaloniaSdk.dll;$(TargetDir)ShiroBot.AvaloniaSdk.pdb;$(TargetDir)ShiroBot.SDK.dll;$(TargetDir)ShiroBot.SDK.pdb;$(TargetDir)ShiroBot.Model.dll;$(TargetDir)ShiroBot.Model.pdb;$(TargetDir)libSkiaSharp.dll;$(TargetDir)runtimes\**\libSkiaSharp.dll" />
+        </ItemGroup>
+
+        <Delete Files="@(HostProvidedDebugOutput)" />
+        <RemoveDir Directories="$(TargetDir)runtimes" />
+    </Target>
 
     <Target Name="RepackPlugin" AfterTargets="Publish" Condition="'$(Configuration)'=='Release'">
         <PropertyGroup>
@@ -73,25 +87,6 @@
 
         <Delete Files="@(PublishHostProvidedOutput)" />
         <RemoveDir Directories="$(PublishDir)runtimes" />
-    </Target>
-
-    <Target Name="CopyPluginToHost"
-            AfterTargets="Build"
-            Condition="'$(Configuration)'=='Debug'">
-        <MakeDir Directories="$(HostPluginDir)" />
-
-        <ItemGroup>
-            <PluginDebugOutput Include="$(TargetDir)**\*"
-                               Exclude="$(TargetDir)Avalonia*.dll;$(TargetDir)Avalonia*.pdb;$(TargetDir)HarfBuzzSharp.dll;$(TargetDir)HarfBuzzSharp.pdb;$(TargetDir)MicroCom.Runtime.dll;$(TargetDir)MicroCom.Runtime.pdb;$(TargetDir)SkiaSharp.dll;$(TargetDir)SkiaSharp.pdb;$(TargetDir)runtimes\**\*;$(TargetDir)$(AssemblyName).exe;$(TargetDir)$(AssemblyName).runtimeconfig.json;$(TargetDir)ShiroBot.AvaloniaSdk.dll;$(TargetDir)ShiroBot.AvaloniaSdk.pdb;$(TargetDir)ShiroBot.SDK.dll;$(TargetDir)ShiroBot.SDK.pdb;$(TargetDir)ShiroBot.Model.dll;$(TargetDir)ShiroBot.Model.pdb" />
-            <PluginPreviewOnlyOutput Include="$(HostPluginDir)Avalonia*.dll;$(HostPluginDir)Avalonia*.pdb;$(HostPluginDir)HarfBuzzSharp.dll;$(HostPluginDir)HarfBuzzSharp.pdb;$(HostPluginDir)MicroCom.Runtime.dll;$(HostPluginDir)MicroCom.Runtime.pdb;$(HostPluginDir)SkiaSharp.dll;$(HostPluginDir)SkiaSharp.pdb;$(HostPluginDir)$(AssemblyName).exe;$(HostPluginDir)$(AssemblyName).runtimeconfig.json;$(HostPluginDir)runtimes\**\*" />
-        </ItemGroup>
-
-        <Delete Files="@(PluginPreviewOnlyOutput)" />
-        <RemoveDir Directories="$(HostPluginDir)runtimes" />
-
-        <Copy SourceFiles="@(PluginDebugOutput)"
-              DestinationFiles="@(PluginDebugOutput->'$(HostPluginDir)%(RecursiveDir)%(Filename)%(Extension)')"
-              SkipUnchangedFiles="true" />
     </Target>
 
 </Project>

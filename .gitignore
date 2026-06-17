@@ -10,6 +10,7 @@ artifacts/
 .vs/
 .vscode/
 *.DotSettings.user
+Directory.Build.local.props
 *.suo
 *.user
 *.userosscache

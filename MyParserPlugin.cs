@@ -319,6 +319,11 @@ public sealed class MyParserPlugin : PluginBase
 
     private bool ShouldAutoParse(IncomingMessage message)
     {
+        if (TryBuildBilibiliPageLinkFromReply(message, out _))
+        {
+            return _config.AutoParseBilibiliLinks;
+        }
+
         var text = GetPlainText(message);
         if (!string.IsNullOrWhiteSpace(text))
         {
@@ -326,6 +331,7 @@ public sealed class MyParserPlugin : PluginBase
             if (trimmed.StartsWith(_config.ParseCommandPrefix, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith("#parser", StringComparison.OrdinalIgnoreCase)
                 || IsPluginResultMessage(trimmed)
+                || IsBilibiliPageTemplateLink(trimmed)
                 || trimmed.StartsWith(_config.BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith(_config.XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith(_config.DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
@@ -350,6 +356,11 @@ public sealed class MyParserPlugin : PluginBase
 
     private Task HandleAutoParseAsync(IncomingMessage message)
     {
+        if (TryBuildBilibiliPageLinkFromReply(message, out var pageLink))
+        {
+            return DispatchParseAsync(message, pageLink);
+        }
+
         return _providerRegistry?.FindProvider(message, out var parseText) is not null && !string.IsNullOrWhiteSpace(parseText)
             ? DispatchParseAsync(message, parseText)
             : Task.CompletedTask;
@@ -493,6 +504,44 @@ public sealed class MyParserPlugin : PluginBase
         }
     }
 
+    private static bool TryBuildBilibiliPageLinkFromReply(IncomingMessage message, out string pageLink)
+    {
+        pageLink = string.Empty;
+        var text = GetPlainText(message).Trim();
+        if (!int.TryParse(text, out var page) || page <= 0)
+        {
+            return false;
+        }
+
+        var reply = message switch
+        {
+            GroupIncomingMessage group => group.GetReply(),
+            FriendIncomingMessage friend => friend.GetReply(),
+            _ => null,
+        };
+        if (reply is null)
+        {
+            return false;
+        }
+
+        var repliedText = string.Concat(reply.Segments.OfType<TextIncomingSegment>().Select(i => i.Text)).Trim();
+        if (!IsBilibiliPageTemplateLink(repliedText))
+        {
+            return false;
+        }
+
+        pageLink = repliedText + page;
+        return true;
+    }
+
+    private static bool IsBilibiliPageTemplateLink(string text)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text.Trim(),
+            @"^https?://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}/?\?p=\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
     private static bool IsPluginResultMessage(string text)
     {
         return text.StartsWith("Bilibili 视频解析", StringComparison.OrdinalIgnoreCase)
@@ -507,6 +556,11 @@ public sealed class MyParserPlugin : PluginBase
 
     private Task DispatchParseAsync(IncomingMessage message, string text)
     {
+        if (IsBilibiliPageTemplateLink(text))
+        {
+            return Task.CompletedTask;
+        }
+
         var provider = _providerRegistry?.FindProvider(text);
         return provider?.Id switch
         {

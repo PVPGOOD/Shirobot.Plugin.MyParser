@@ -66,6 +66,13 @@ internal sealed class BilibiliMessageHandler : IDisposable
                 return;
             }
 
+            if (media.ProviderPayload is BilibiliMultiPageParseResult multiPage)
+            {
+                await SendMultiPageForwardAsync(message, multiPage);
+                await TryReactToSourceMessageAsync(message, "426");
+                return;
+            }
+
             if (media.ProviderPayload is not BilibiliParseResult result)
             {
                 return;
@@ -530,7 +537,47 @@ internal sealed class BilibiliMessageHandler : IDisposable
 
     private Task ReplyAsync(IncomingMessage message, string text)
     {
+        return SendReplyAsync(message, text);
+    }
+
+    private Task<SendMessageResult> SendReplyAsync(IncomingMessage message, string text)
+    {
         return _config.QuoteReply ? _context.Message.QuoteReplyAsync(message, text) : _context.Message.ReplyAsync(message, text);
+    }
+
+    private static string NormalizePageReplyText(string text)
+    {
+        return text.Trim().Trim('"', '\'', '“', '”', '‘', '’', '「', '」', '『', '』').Trim();
+    }
+
+    private void SubscribeBilibiliPageReply(BilibiliMultiPageParseResult result, long promptMessageSeq)
+    {
+        IReplySubscription? subscription = null;
+        subscription = _context.Message.SubscribeReply(promptMessageSeq, TimeSpan.FromMinutes(10), async reply =>
+        {
+            var text = reply switch
+            {
+                GroupIncomingMessage group => group.GetPlainText(),
+                FriendIncomingMessage friend => friend.GetPlainText(),
+                TempIncomingMessage temp => string.Concat(temp.Segments.OfType<TextIncomingSegment>().Select(i => i.Text)),
+                _ => string.Empty,
+            };
+
+            if (!int.TryParse(NormalizePageReplyText(text), out var page) || page <= 0)
+            {
+                await ReplyAsync(reply, $"请回复 1 到 {result.PageCount} 之间的数字来解析指定分P。");
+                return;
+            }
+
+            if (page > result.PageCount)
+            {
+                await ReplyAsync(reply, $"该视频只有 {result.PageCount} 个分P，请回复 1 到 {result.PageCount} 之间的数字。");
+                return;
+            }
+
+            subscription?.Dispose();
+            await ParseAndReplyAsync(reply, $"https://www.bilibili.com/video/{result.Bvid}/?p={page}");
+        }, disposeOnReply: false);
     }
 
     private LocalVideoHttpServer GetLocalVideoHttpServer()
@@ -567,6 +614,93 @@ internal sealed class BilibiliMessageHandler : IDisposable
         {
             BotLog.Info($"MyParser Bilibili 可用画质: #{index}, quality={stream.QualityName}, fps={stream.Fps}, bitrate_kbps={stream.Bandwidth / 1000}, size={stream.Width}x{stream.Height}, codec={stream.CodecName}");
         }
+    }
+
+    private async Task SendMultiPageForwardAsync(IncomingMessage message, BilibiliMultiPageParseResult result)
+    {
+        var senderId = GetBotOrSenderId(message);
+        var senderName = string.IsNullOrWhiteSpace(result.AuthorName) ? "Bilibili 分P视频" : result.AuthorName!;
+        var forwarded = new List<OutgoingForwardedMessage>();
+        var headerSegments = new List<OutgoingSegment>();
+
+        if (!string.IsNullOrWhiteSpace(result.CoverUrl))
+        {
+            var cover = await BuildRemoteImageAsync(result.CoverUrl, result.SourceUrl, $"bilibili_multipage_cover_{result.Bvid}");
+            if (!string.IsNullOrWhiteSpace(cover.Uri))
+            {
+                headerSegments.Add(new ImageOutgoingSegment(cover.Uri));
+            }
+        }
+
+        headerSegments.Add(new TextOutgoingSegment(BuildMultiPageHeaderText(result)));
+        forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, headerSegments));
+
+        var coverImageLimit = Math.Max(0, _config.BilibiliMultiPageCoverImageLimit);
+        foreach (var page in result.Pages)
+        {
+            var segments = new List<OutgoingSegment>();
+            if (page.Page <= coverImageLimit && !string.IsNullOrWhiteSpace(page.CoverUrl))
+            {
+                var pageCover = await BuildRemoteImageAsync(page.CoverUrl, page.SourceUrl, $"bilibili_multipage_{result.Bvid}_p{page.Page:D3}");
+                if (!string.IsNullOrWhiteSpace(pageCover.Uri))
+                {
+                    segments.Add(new ImageOutgoingSegment(pageCover.Uri));
+                }
+            }
+
+            segments.Add(new TextOutgoingSegment(BuildMultiPagePageText(page)));
+            forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, segments));
+        }
+
+        var title = string.IsNullOrWhiteSpace(result.Title) ? $"Bilibili 分P视频 {result.Bvid}" : TrimLine(result.Title!, 48);
+        var preview = new[]
+        {
+            $"{result.PageCount} 个分P",
+            string.IsNullOrWhiteSpace(result.AuthorName) ? result.Bvid : result.AuthorName!,
+            "仅展示分P信息，不下载视频",
+        };
+        var summary = $"分P视频 · {result.PageCount}P";
+        var forward = new ForwardOutgoingSegment(forwarded, title, preview, summary, "Bilibili 分P");
+
+        switch (message)
+        {
+            case GroupIncomingMessage group:
+                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+                break;
+            case FriendIncomingMessage friend:
+                await _context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+                break;
+            default:
+                await _context.Message.ReplyAsync(message, forward);
+                break;
+        }
+
+        var prompt = await SendReplyAsync(message, $"如需解析指定分P，请用数字回复此消息。例：回复 \"4\" 即解析 P4。也可以直接发送：https://www.bilibili.com/video/{result.Bvid}/?p=4");
+        SubscribeBilibiliPageReply(result, prompt.MessageSeq);
+    }
+
+    private static string BuildMultiPageHeaderText(BilibiliMultiPageParseResult result)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Bilibili 分P视频解析成功");
+        sb.AppendLine($"BV：{result.Bvid}");
+        sb.AppendLine($"分P数量：{result.PageCount}");
+        if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"标题：{TrimLine(result.Title, 120)}");
+        if (!string.IsNullOrWhiteSpace(result.AuthorName)) sb.AppendLine($"UP：{result.AuthorName}");
+        if (result.RequestedPage > 1) sb.AppendLine($"当前链接指定：P{result.RequestedPage}");
+        if (!string.IsNullOrWhiteSpace(result.CoverUrl)) sb.AppendLine($"主封面：{result.CoverUrl}");
+        if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string BuildMultiPagePageText(BilibiliVideoPageInfo page)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"P{page.Page}: {TrimLine(string.IsNullOrWhiteSpace(page.PartTitle) ? "未命名" : page.PartTitle!, 80)}");
+        if (page.DurationSeconds > 0) sb.AppendLine($"时长：{FormatDurationText(page.DurationSeconds)}");
+        if (!string.IsNullOrWhiteSpace(page.CoverUrl)) sb.AppendLine($"封面：{page.CoverUrl}");
+        sb.AppendLine($"链接：{page.SourceUrl}");
+        return sb.ToString().TrimEnd();
     }
 
     private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliLiveParseResult result)

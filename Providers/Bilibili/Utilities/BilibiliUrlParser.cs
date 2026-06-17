@@ -58,6 +58,24 @@ internal static partial class BilibiliUrlParser
         return match.Success ? match.Groups[1].Value : null;
     }
 
+    public static int? ExtractVideoPage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        foreach (var match in VideoPageRegex().Matches(text).Cast<Match>())
+        {
+            if (int.TryParse(match.Groups[1].Value, out var page) && page > 0)
+            {
+                return page;
+            }
+        }
+
+        return null;
+    }
+
     public static string? ExtractB23Url(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -100,4 +118,7 @@ internal static partial class BilibiliUrlParser
 
     [GeneratedRegex(@"(?:https?://)?b23\.tv/[0-9A-Za-z]+", RegexOptions.IgnoreCase)]
     private static partial Regex B23UrlRegex();
+
+    [GeneratedRegex(@"[?&]p=(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex VideoPageRegex();
 }

@@ -25,22 +25,42 @@ internal sealed class BilibiliParseProvider(BilibiliParser parser) : IIncomingMe
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)
     {
-        var result = await Parser.ParseAsync(text, cancellationToken);
-        return new MediaParseResult
+        var result = await Parser.ParseMediaAsync(text, cancellationToken);
+        return result switch
         {
-            ProviderId = Id,
-            ProviderName = Name,
-            MediaId = result.Bvid,
-            SourceUrl = result.SourceUrl,
-            Title = result.Title,
-            AuthorName = result.AuthorName,
-            AuthorId = result.AuthorId,
-            CoverUrl = result.CoverUrl,
-            MusicUrl = null,
-            Tags = [],
-            IsGallery = false,
-            IsVideo = result.IsVideo,
-            ProviderPayload = result,
+            BilibiliMultiPageParseResult multi => new MediaParseResult
+            {
+                ProviderId = Id,
+                ProviderName = Name,
+                MediaId = multi.Bvid,
+                SourceUrl = multi.SourceUrl,
+                Title = multi.Title,
+                AuthorName = multi.AuthorName,
+                AuthorId = multi.AuthorId,
+                CoverUrl = multi.CoverUrl,
+                MusicUrl = null,
+                Tags = [],
+                IsGallery = true,
+                IsVideo = false,
+                ProviderPayload = multi,
+            },
+            BilibiliParseResult video => new MediaParseResult
+            {
+                ProviderId = Id,
+                ProviderName = Name,
+                MediaId = video.Bvid,
+                SourceUrl = video.SourceUrl,
+                Title = video.Title,
+                AuthorName = video.AuthorName,
+                AuthorId = video.AuthorId,
+                CoverUrl = video.CoverUrl,
+                MusicUrl = null,
+                Tags = [],
+                IsGallery = false,
+                IsVideo = video.IsVideo,
+                ProviderPayload = video,
+            },
+            _ => throw new BilibiliParseException("Bilibili 视频解析返回了未知结果类型。"),
         };
     }
 

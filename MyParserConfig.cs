@@ -122,6 +122,8 @@ public sealed class MyParserConfig
 
     public bool IncludeRawMediaUrls { get; set; } = false;
 
+    public int BilibiliMultiPageCoverImageLimit { get; set; } = 50;
+
     public int MaxVideoDownloadMegabytes { get; set; } = 5120;
 
     public bool AutoFallbackQualityBySize { get; set; } = false;

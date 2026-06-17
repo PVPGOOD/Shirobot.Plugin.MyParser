@@ -31,6 +31,32 @@ internal sealed record BilibiliParseResult
     public bool IsVideo => SelectedVideo is not null && SelectedAudio is not null;
 }
 
+internal sealed record BilibiliMultiPageParseResult
+{
+    public required string Bvid { get; init; }
+    public long Aid { get; init; }
+    public string? SourceUrl { get; init; }
+    public string? Title { get; init; }
+    public string? Description { get; init; }
+    public string? AuthorName { get; init; }
+    public string? AuthorId { get; init; }
+    public string? AuthorAvatarUrl { get; init; }
+    public string? CoverUrl { get; init; }
+    public int RequestedPage { get; init; } = 1;
+    public IReadOnlyList<BilibiliVideoPageInfo> Pages { get; init; } = [];
+    public int PageCount => Pages.Count;
+}
+
+internal sealed record BilibiliVideoPageInfo
+{
+    public int Page { get; init; }
+    public long Cid { get; init; }
+    public string? PartTitle { get; init; }
+    public long DurationSeconds { get; init; }
+    public string SourceUrl { get; init; } = string.Empty;
+    public string? CoverUrl { get; init; }
+}
+
 internal sealed record BilibiliMediaStream
 {
     public required string StreamId { get; init; }

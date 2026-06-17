@@ -45,7 +45,6 @@ public sealed class MyParserPlugin : PluginBase
         LoadDouyinCookieFromPluginDirectory();
         LoadBilibiliCookieFromPluginDirectory();
         LoadXiaohongshuCookieFromPluginDirectory();
-        Context.Config.Save(_config);
         _douyinProvider = new DouyinParseProvider(new DouyinParser(_config));
         var bilibiliParser = new BilibiliParser(_config);
         _bilibiliProvider = new BilibiliParseProvider(bilibiliParser);
@@ -154,15 +153,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private void LoadDouyinCookieFromPluginDirectory()
     {
-        var pluginDir = Path.GetDirectoryName(Context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        Directory.CreateDirectory(pluginDir);
-
-        var cookieFileName = string.IsNullOrWhiteSpace(_config.DouyinCookieFileName)
-            ? "douyin_cookie.txt"
-            : _config.DouyinCookieFileName.Trim();
-        var cookiePath = Path.IsPathRooted(cookieFileName)
-            ? cookieFileName
-            : Path.Combine(pluginDir, cookieFileName);
+        var cookiePath = ResolveCookiePath(_config.DouyinCookieFileName, "douyin_cookie.txt");
 
         if (!File.Exists(cookiePath))
         {
@@ -198,15 +189,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private void LoadBilibiliCookieFromPluginDirectory()
     {
-        var pluginDir = Path.GetDirectoryName(Context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        Directory.CreateDirectory(pluginDir);
-
-        var cookieFileName = string.IsNullOrWhiteSpace(_config.BilibiliCookieFileName)
-            ? "bilibili_cookie.txt"
-            : _config.BilibiliCookieFileName.Trim();
-        var cookiePath = Path.IsPathRooted(cookieFileName)
-            ? cookieFileName
-            : Path.Combine(pluginDir, cookieFileName);
+        var cookiePath = ResolveCookiePath(_config.BilibiliCookieFileName, "bilibili_cookie.txt");
 
         if (!File.Exists(cookiePath))
         {
@@ -242,15 +225,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private void LoadXiaohongshuCookieFromPluginDirectory()
     {
-        var pluginDir = Path.GetDirectoryName(Context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        Directory.CreateDirectory(pluginDir);
-
-        var cookieFileName = string.IsNullOrWhiteSpace(_config.XiaohongshuCookieFileName)
-            ? "xiaohongshu_cookie.txt"
-            : _config.XiaohongshuCookieFileName.Trim();
-        var cookiePath = Path.IsPathRooted(cookieFileName)
-            ? cookieFileName
-            : Path.Combine(pluginDir, cookieFileName);
+        var cookiePath = ResolveCookiePath(_config.XiaohongshuCookieFileName, "xiaohongshu_cookie.txt");
 
         if (!File.Exists(cookiePath))
         {
@@ -276,6 +251,29 @@ public sealed class MyParserPlugin : PluginBase
 
         _config.XiaohongshuCookie = cookie;
         BotLog.Info($"MyParser 已从插件目录读取 XiaohongshuCookie：{cookiePath}");
+    }
+
+    private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
+    {
+        var pluginDir = Path.GetDirectoryName(Context.Config.ConfigPath) ?? AppContext.BaseDirectory;
+        var cookieDir = string.IsNullOrWhiteSpace(_config.CookieDirectory)
+            ? Path.Combine(pluginDir, "cookie")
+            : _config.CookieDirectory.Trim();
+
+        if (!Path.IsPathRooted(cookieDir))
+        {
+            cookieDir = Path.Combine(pluginDir, cookieDir);
+        }
+
+        Directory.CreateDirectory(cookieDir);
+        var fileName = string.IsNullOrWhiteSpace(configuredFileName) ? defaultFileName : configuredFileName.Trim();
+        if (Path.IsPathRooted(fileName))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? cookieDir);
+            return fileName;
+        }
+
+        return Path.Combine(cookieDir, fileName);
     }
 
     private static bool LooksLikeDouyinCookie(string cookie)
@@ -315,7 +313,7 @@ public sealed class MyParserPlugin : PluginBase
                    + $"3. {_config.BilibiliLoginCommand}：Bilibili 扫码登录并保存 Cookie\n"
                    + $"4. {_config.XiaohongshuLoginCommand}：小红书扫码登录并保存 Cookie\n"
                    + $"5. {_config.DouyinCookieCheckCommand} / {_config.BilibiliCookieCheckCommand} / {_config.XiaohongshuCookieCheckCommand}：检查 Cookie 有效性\n\n"
-                   + "Cookie 文件：插件目录/douyin_cookie.txt、bilibili_cookie.txt、xiaohongshu_cookie.txt\n"
+                   + "Cookie 文件：插件目录/cookie/douyin_cookie.txt、cookie/bilibili_cookie.txt、cookie/xiaohongshu_cookie.txt\n"
                    + "Bilibili 说明：需要登录态；视频/音频流会分别下载，并用本地 ffmpeg 合并后发送。\n"
                    + "小红书说明：需要自行搭建 xhshow sign 服务，并在运行时配置 sign URL/token。";
         return Context.Message.ReplyAsync(message, help);

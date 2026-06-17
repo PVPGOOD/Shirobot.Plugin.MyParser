@@ -10,6 +10,8 @@ public sealed class MyParserConfig
 
     public string ParseCommandPrefix { get; set; } = "#parse";
 
+    public string CookieDirectory { get; set; } = "cookie";
+
     public string DouyinCookie { get; set; } = string.Empty;
 
     public string DouyinCookieFileName { get; set; } = "douyin_cookie.txt";

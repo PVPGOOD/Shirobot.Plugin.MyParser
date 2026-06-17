@@ -121,8 +121,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
                 if (poll.IsLogin)
                 {
                     SaveXiaohongshuCookieToPluginDirectory();
-                    _context.Config.Save(_config);
-                    await ReplyAsync(message, $"小红书登录成功：{poll.UserName ?? "已登录"}。Cookie 已保存到配置和插件目录。");
+                    await ReplyAsync(message, $"小红书登录成功：{poll.UserName ?? "已登录"}。Cookie 已保存到插件 cookie 目录。");
                     return;
                 }
 
@@ -485,11 +484,31 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private void SaveXiaohongshuCookieToPluginDirectory()
     {
-        var pluginDir = Path.GetDirectoryName(_context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        Directory.CreateDirectory(pluginDir);
-        var fileName = string.IsNullOrWhiteSpace(_config.XiaohongshuCookieFileName) ? "xiaohongshu_cookie.txt" : _config.XiaohongshuCookieFileName.Trim();
-        var path = Path.IsPathRooted(fileName) ? fileName : Path.Combine(pluginDir, fileName);
+        var path = ResolveCookiePath(_config.XiaohongshuCookieFileName, "xiaohongshu_cookie.txt");
         File.WriteAllText(path, _config.XiaohongshuCookie ?? string.Empty, Encoding.UTF8);
+    }
+
+    private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
+    {
+        var pluginDir = Path.GetDirectoryName(_context.Config.ConfigPath) ?? AppContext.BaseDirectory;
+        var cookieDir = string.IsNullOrWhiteSpace(_config.CookieDirectory)
+            ? Path.Combine(pluginDir, "cookie")
+            : _config.CookieDirectory.Trim();
+
+        if (!Path.IsPathRooted(cookieDir))
+        {
+            cookieDir = Path.Combine(pluginDir, cookieDir);
+        }
+
+        Directory.CreateDirectory(cookieDir);
+        var fileName = string.IsNullOrWhiteSpace(configuredFileName) ? defaultFileName : configuredFileName.Trim();
+        if (Path.IsPathRooted(fileName))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? cookieDir);
+            return fileName;
+        }
+
+        return Path.Combine(cookieDir, fileName);
     }
 
     private Task ReplyAsync(IncomingMessage message, string text)

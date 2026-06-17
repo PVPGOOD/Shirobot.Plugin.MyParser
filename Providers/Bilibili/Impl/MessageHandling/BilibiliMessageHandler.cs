@@ -208,8 +208,7 @@ internal sealed class BilibiliMessageHandler : IDisposable
                 {
                     case 0 when poll.IsLogin:
                         SaveBilibiliCookieToPluginDirectory();
-                        _context.Config.Save(_config);
-                        await ReplyAsync(message, $"Bilibili 登录成功");
+                        await ReplyAsync(message, $"Bilibili 登录成功，Cookie 已保存到插件 cookie 目录。");
                         return;
                     case 86038:
                         await ReplyAsync(message, "Bilibili 登录二维码已过期，请重新发送登录命令。");
@@ -542,11 +541,31 @@ internal sealed class BilibiliMessageHandler : IDisposable
 
     private void SaveBilibiliCookieToPluginDirectory()
     {
-        var pluginDir = Path.GetDirectoryName(_context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        Directory.CreateDirectory(pluginDir);
-        var fileName = string.IsNullOrWhiteSpace(_config.BilibiliCookieFileName) ? "bilibili_cookie.txt" : _config.BilibiliCookieFileName.Trim();
-        var path = Path.IsPathRooted(fileName) ? fileName : Path.Combine(pluginDir, fileName);
+        var path = ResolveCookiePath(_config.BilibiliCookieFileName, "bilibili_cookie.txt");
         File.WriteAllText(path, _config.BilibiliCookie ?? string.Empty, Encoding.UTF8);
+    }
+
+    private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
+    {
+        var pluginDir = Path.GetDirectoryName(_context.Config.ConfigPath) ?? AppContext.BaseDirectory;
+        var cookieDir = string.IsNullOrWhiteSpace(_config.CookieDirectory)
+            ? Path.Combine(pluginDir, "cookie")
+            : _config.CookieDirectory.Trim();
+
+        if (!Path.IsPathRooted(cookieDir))
+        {
+            cookieDir = Path.Combine(pluginDir, cookieDir);
+        }
+
+        Directory.CreateDirectory(cookieDir);
+        var fileName = string.IsNullOrWhiteSpace(configuredFileName) ? defaultFileName : configuredFileName.Trim();
+        if (Path.IsPathRooted(fileName))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? cookieDir);
+            return fileName;
+        }
+
+        return Path.Combine(cookieDir, fileName);
     }
 
     private Task ReplyAsync(IncomingMessage message, string text)

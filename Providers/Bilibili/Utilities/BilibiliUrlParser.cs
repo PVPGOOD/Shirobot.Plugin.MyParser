@@ -6,7 +6,7 @@ internal static partial class BilibiliUrlParser
 {
     public static bool ContainsBilibiliUrl(string text)
     {
-        return ExtractBvid(text) is not null || ExtractCvid(text) is not null || ExtractOpusId(text) is not null || ExtractLiveRoomId(text) is not null || ExtractB23Url(text) is not null;
+        return ExtractBvid(text) is not null || ExtractCvid(text) is not null || ExtractOpusId(text) is not null || ExtractLiveRoomId(text) is not null || ExtractBangumiIds(text).HasAny || ExtractB23Url(text) is not null;
     }
 
     public static string? ExtractBvid(string text)
@@ -76,6 +76,22 @@ internal static partial class BilibiliUrlParser
         return null;
     }
 
+    public static BilibiliBangumiIds ExtractBangumiIds(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new BilibiliBangumiIds(null, null, null);
+        }
+
+        var ep = BangumiEpRegex().Match(text);
+        var ss = BangumiSeasonRegex().Match(text);
+        var md = BangumiMediaRegex().Match(text);
+        return new BilibiliBangumiIds(
+            ep.Success && long.TryParse(ep.Groups[1].Value, out var epId) ? epId : null,
+            ss.Success && long.TryParse(ss.Groups[1].Value, out var seasonId) ? seasonId : null,
+            md.Success && long.TryParse(md.Groups[1].Value, out var mediaId) ? mediaId : null);
+    }
+
     public static string? ExtractB23Url(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -121,4 +137,18 @@ internal static partial class BilibiliUrlParser
 
     [GeneratedRegex(@"[?&]p=(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex VideoPageRegex();
+
+    [GeneratedRegex(@"(?:/bangumi/play/)?ep(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex BangumiEpRegex();
+
+    [GeneratedRegex(@"(?:/bangumi/play/)?ss(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex BangumiSeasonRegex();
+
+    [GeneratedRegex(@"(?:/bangumi/media/)?md(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex BangumiMediaRegex();
+}
+
+internal sealed record BilibiliBangumiIds(long? EpId, long? SeasonId, long? MediaId)
+{
+    public bool HasAny => EpId is not null || SeasonId is not null || MediaId is not null;
 }

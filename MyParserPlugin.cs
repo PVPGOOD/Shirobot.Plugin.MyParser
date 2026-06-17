@@ -27,6 +27,7 @@ public sealed class MyParserPlugin : PluginBase
     private DouyinParseProvider? _douyinProvider;
     private BilibiliParseProvider? _bilibiliProvider;
     private BilibiliArticleParseProvider? _bilibiliArticleProvider;
+    private BilibiliBangumiParseProvider? _bilibiliBangumiProvider;
     private BilibiliLiveParseProvider? _bilibiliLiveProvider;
     private XiaohongshuParseProvider? _xiaohongshuProvider;
     private ParseProviderRegistry? _providerRegistry;
@@ -47,9 +48,10 @@ public sealed class MyParserPlugin : PluginBase
         var bilibiliParser = new BilibiliParser(_config);
         _bilibiliProvider = new BilibiliParseProvider(bilibiliParser);
         _bilibiliArticleProvider = new BilibiliArticleParseProvider(bilibiliParser);
+        _bilibiliBangumiProvider = new BilibiliBangumiParseProvider(new BilibiliBangumiParser(bilibiliParser.HttpClient, _config));
         _bilibiliLiveProvider = new BilibiliLiveParseProvider(new BilibiliLiveParser(bilibiliParser.HttpClient, _config));
         _xiaohongshuProvider = new XiaohongshuParseProvider(new XiaohongshuParser(_config));
-        _providerRegistry = new ParseProviderRegistry([_xiaohongshuProvider, _douyinProvider, _bilibiliArticleProvider, _bilibiliLiveProvider, _bilibiliProvider]);
+        _providerRegistry = new ParseProviderRegistry([_xiaohongshuProvider, _douyinProvider, _bilibiliArticleProvider, _bilibiliBangumiProvider, _bilibiliLiveProvider, _bilibiliProvider]);
         _douyinMessageHandler = new DouyinMessageHandler(Context, _config, _providerRegistry, _douyinProvider);
         _bilibiliMessageHandler = new BilibiliMessageHandler(Context, _config, _providerRegistry, _bilibiliProvider);
         _xiaohongshuMessageHandler = new XiaohongshuMessageHandler(Context, _config, _providerRegistry, _xiaohongshuProvider);
@@ -348,6 +350,7 @@ public sealed class MyParserPlugin : PluginBase
             "douyin" => _config.AutoParseDouyinLinks,
             "bilibili" => _config.AutoParseBilibiliLinks,
             "bilibili-article" => _config.AutoParseBilibiliLinks,
+            "bilibili-bangumi" => _config.AutoParseBilibiliLinks,
             "bilibili-live" => _config.AutoParseBilibiliLinks,
             "xiaohongshu" => _config.AutoParseXiaohongshuLinks,
             _ => false,
@@ -567,6 +570,7 @@ public sealed class MyParserPlugin : PluginBase
             "douyin" => _douyinMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "bilibili" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "bilibili-article" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
+            "bilibili-bangumi" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "bilibili-live" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             "xiaohongshu" => _xiaohongshuMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             _ => Context.Message.ReplyAsync(message, "未找到可处理该链接的解析提供商。"),

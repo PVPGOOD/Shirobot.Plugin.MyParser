@@ -66,6 +66,19 @@ internal sealed class BilibiliMessageHandler : IDisposable
                 return;
             }
 
+            BilibiliParseResult? episodeVideo = null;
+            if (media.ProviderPayload is BilibiliBangumiEpisodeVideoParseResult bangumiEpisode)
+            {
+                await SendBangumiForwardAsync(message, bangumiEpisode.Bangumi, sendEpHint: false);
+                episodeVideo = bangumiEpisode.Video;
+            }
+            else if (media.ProviderPayload is BilibiliBangumiParseResult bangumi)
+            {
+                await SendBangumiForwardAsync(message, bangumi);
+                await TryReactToSourceMessageAsync(message, "426");
+                return;
+            }
+
             if (media.ProviderPayload is BilibiliMultiPageParseResult multiPage)
             {
                 await SendMultiPageForwardAsync(message, multiPage);
@@ -73,7 +86,8 @@ internal sealed class BilibiliMessageHandler : IDisposable
                 return;
             }
 
-            if (media.ProviderPayload is not BilibiliParseResult result)
+            var result = episodeVideo ?? media.ProviderPayload as BilibiliParseResult;
+            if (result is null)
             {
                 return;
             }
@@ -614,6 +628,96 @@ internal sealed class BilibiliMessageHandler : IDisposable
         {
             BotLog.Info($"MyParser Bilibili 可用画质: #{index}, quality={stream.QualityName}, fps={stream.Fps}, bitrate_kbps={stream.Bandwidth / 1000}, size={stream.Width}x{stream.Height}, codec={stream.CodecName}");
         }
+    }
+
+    private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBangumiParseResult result, bool sendEpHint = true)
+    {
+        var senderId = GetBotOrSenderId(message);
+        var senderName = "Bilibili 番剧";
+        var forwarded = new List<OutgoingForwardedMessage>();
+        var headerSegments = new List<OutgoingSegment>();
+
+        if (!string.IsNullOrWhiteSpace(result.CoverUrl))
+        {
+            var cover = await BuildRemoteImageAsync(result.CoverUrl, result.MediaUrl ?? result.SeasonUrl, $"bilibili_bangumi_cover_{result.MediaId ?? result.SeasonId ?? result.RequestedEpId ?? 0}");
+            if (!string.IsNullOrWhiteSpace(cover.Uri))
+            {
+                headerSegments.Add(new ImageOutgoingSegment(cover.Uri));
+            }
+        }
+
+        headerSegments.Add(new TextOutgoingSegment(BuildBangumiHeaderText(result)));
+        forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, headerSegments));
+
+        foreach (var chunk in result.Episodes.Chunk(10))
+        {
+            forwarded.Add(new OutgoingForwardedMessage(senderId, senderName,
+            [
+                new TextOutgoingSegment(BuildBangumiEpisodeChunkText(chunk, result.RequestedEpId))
+            ]));
+        }
+
+        var title = string.IsNullOrWhiteSpace(result.Title) ? "Bilibili 番剧" : TrimLine(result.Title!, 48);
+        var preview = new[]
+        {
+            result.MediaId is null ? $"Season ID {result.SeasonId}" : $"Media ID {result.MediaId}",
+            result.PublishText ?? $"共 {result.Episodes.Count} 话",
+            result.RatingText ?? "剧集列表",
+        };
+        var summary = $"番剧 · {result.Episodes.Count}话";
+        var forward = new ForwardOutgoingSegment(forwarded, title, preview, summary, "Bilibili 番剧");
+
+        switch (message)
+        {
+            case GroupIncomingMessage group:
+                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+                break;
+            case FriendIncomingMessage friend:
+                await _context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+                break;
+            default:
+                await _context.Message.ReplyAsync(message, forward);
+                break;
+        }
+
+        if (sendEpHint && result.RequestedEpId is { } epId)
+        {
+            await ReplyAsync(message, $"解析 https://www.bilibili.com/bangumi/play/ep{epId} 即可。");
+        }
+    }
+
+    private static string BuildBangumiHeaderText(BilibiliBangumiParseResult result)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Bilibili 番剧解析成功");
+        if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"名称：{result.Title}");
+        if (result.MediaId is not null) sb.AppendLine($"Media ID {result.MediaId}");
+        if (result.SeasonId is not null) sb.AppendLine($"Season ID {result.SeasonId}");
+        if (!string.IsNullOrWhiteSpace(result.PublishText)) sb.AppendLine(result.PublishText);
+        if (!string.IsNullOrWhiteSpace(result.RatingText)) sb.AppendLine(result.RatingText);
+        if (!string.IsNullOrWhiteSpace(result.PlayText)) sb.AppendLine(result.PlayText);
+        if (!string.IsNullOrWhiteSpace(result.FollowText)) sb.AppendLine(result.FollowText);
+        if (result.Styles.Count > 0) sb.AppendLine("类型：" + string.Join(" / ", result.Styles));
+        if (!string.IsNullOrWhiteSpace(result.Evaluate)) sb.AppendLine("简介：" + TrimLine(result.Evaluate, 180));
+        if (!string.IsNullOrWhiteSpace(result.MediaUrl)) sb.AppendLine("作品：" + result.MediaUrl);
+        if (!string.IsNullOrWhiteSpace(result.SeasonUrl)) sb.AppendLine("季度：" + result.SeasonUrl);
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string BuildBangumiEpisodeChunkText(IEnumerable<BilibiliBangumiEpisodeInfo> episodes, long? requestedEpId)
+    {
+        var sb = new StringBuilder();
+        foreach (var ep in episodes)
+        {
+            var selected = requestedEpId is not null && ep.EpId == requestedEpId ? " ← 当前链接" : string.Empty;
+            var title = string.Join(" ", new[] { ep.Title, ep.LongTitle }.Where(i => !string.IsNullOrWhiteSpace(i)));
+            sb.AppendLine($"第{ep.Index}话{selected}: {TrimLine(string.IsNullOrWhiteSpace(title) ? "未命名" : title, 100)}");
+            if (ep.DurationMilliseconds > 0) sb.AppendLine($"时长：{FormatDurationText(ep.DurationMilliseconds / 1000)}");
+            if (!string.IsNullOrWhiteSpace(ep.Url)) sb.AppendLine($"链接：{ep.Url}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private async Task SendMultiPageForwardAsync(IncomingMessage message, BilibiliMultiPageParseResult result)

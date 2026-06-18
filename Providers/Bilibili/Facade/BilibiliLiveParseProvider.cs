@@ -1,6 +1,5 @@
 using Shirobot.Plugin.MyParser.Parsing;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;

@@ -6,13 +6,8 @@ using Shirobot.Plugin.MyParser.Providers.Douyin.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Impl.MessageHandling;
 using System.Text;
-using ShiroBot.AvaloniaSdk;
 using Shirobot.Plugin.MyParser.Parsing;
 using ShiroBot.Model.Common;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
-using Shirobot.Plugin.MyParser.Providers.Douyin.ViewModels;
-using Shirobot.Plugin.MyParser.Providers.Douyin.Views;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Core;
 using ShiroBot.SDK.Plugin;
@@ -30,7 +25,22 @@ namespace Shirobot.Plugin.MyParser;
 ]
 public sealed class MyParserPlugin : PluginBase
 {
+    private const string CookieDirectoryName = "cookies";
+    private const string DouyinCookieFileName = "douyin.txt";
+    private const string BilibiliCookieFileName = "bilibili.txt";
+    private const string XiaohongshuCookieFileName = "xiaohongshu.txt";
+    private const string BilibiliLoginCommand = "#bili-login";
+    private const string XiaohongshuLoginCommand = "#xhs-login";
+    private const string DouyinCookieCheckCommand = "#douyin-cookie-check";
+    private const string BilibiliCookieCheckCommand = "#bili-cookie-check";
+    private const string XiaohongshuCookieCheckCommand = "#xhs-cookie-check";
+
+    private readonly Lock _reloadLock = new();
     private MyParserConfig _config = new();
+    private FileSystemWatcher? _configWatcher;
+    private FileSystemWatcher? _cookieWatcher;
+    private CancellationTokenSource? _configReloadDebounce;
+    private CancellationTokenSource? _cookieReloadDebounce;
     private DouyinParseProvider? _douyinProvider;
     private BilibiliParseProvider? _bilibiliProvider;
     private BilibiliArticleParseProvider? _bilibiliArticleProvider;
@@ -47,6 +57,7 @@ public sealed class MyParserPlugin : PluginBase
     protected override async Task LoadAsync()
     {
         _config = Context.Config.Load<MyParserConfig>();
+        NormalizeRuntimeDirectories();
         LoadDouyinCookieFromPluginDirectory();
         LoadBilibiliCookieFromPluginDirectory();
         LoadXiaohongshuCookieFromPluginDirectory();
@@ -61,21 +72,10 @@ public sealed class MyParserPlugin : PluginBase
         _douyinMessageHandler = new DouyinMessageHandler(Context, _config, _providerRegistry, _douyinProvider);
         _bilibiliMessageHandler = new BilibiliMessageHandler(Context, _config, _providerRegistry, _bilibiliProvider);
         _xiaohongshuMessageHandler = new XiaohongshuMessageHandler(Context, _config, _providerRegistry, _xiaohongshuProvider);
-
-        if (_config.CheckDouyinCookieLoginStatusOnStartup)
-        {
-            await LogDouyinCookieLoginStatusAsync();
-        }
-
-        if (_config.CheckBilibiliCookieLoginStatusOnStartup)
-        {
-            await LogBilibiliCookieLoginStatusAsync();
-        }
-
-        if (_config.CheckXiaohongshuCookieLoginStatusOnStartup)
-        {
-            await LogXiaohongshuCookieLoginStatusAsync();
-        }
+        
+        await LogDouyinCookieLoginStatusAsync();
+        await LogBilibiliCookieLoginStatusAsync();
+        await LogXiaohongshuCookieLoginStatusAsync();
 
         // GroupCommands.MapExact("b", async message =>
         // {
@@ -97,27 +97,25 @@ public sealed class MyParserPlugin : PluginBase
         //
         FriendCommands.MapExact("#parser", HandleHelpAsync);
         GroupCommands.MapExact("#parser", HandleHelpAsync);
-        FriendCommands.MapExact(_config.BilibiliLoginCommand, HandleBilibiliLoginAsync);
-        GroupCommands.MapExact(_config.BilibiliLoginCommand, HandleBilibiliLoginAsync);
-        FriendCommands.MapExact(_config.XiaohongshuLoginCommand, HandleXiaohongshuLoginAsync);
-        GroupCommands.MapExact(_config.XiaohongshuLoginCommand, HandleXiaohongshuLoginAsync);
-        FriendCommands.MapExact(_config.DouyinCookieCheckCommand, HandleDouyinCookieCheckAsync);
-        GroupCommands.MapExact(_config.DouyinCookieCheckCommand, HandleDouyinCookieCheckAsync);
-        FriendCommands.MapExact(_config.BilibiliCookieCheckCommand, HandleBilibiliCookieCheckAsync);
-        GroupCommands.MapExact(_config.BilibiliCookieCheckCommand, HandleBilibiliCookieCheckAsync);
-        FriendCommands.MapExact(_config.XiaohongshuCookieCheckCommand, HandleXiaohongshuCookieCheckAsync);
-        GroupCommands.MapExact(_config.XiaohongshuCookieCheckCommand, HandleXiaohongshuCookieCheckAsync);
+        FriendCommands.MapExact(BilibiliLoginCommand, HandleBilibiliLoginAsync);
+        GroupCommands.MapExact(BilibiliLoginCommand, HandleBilibiliLoginAsync);
+        FriendCommands.MapExact(XiaohongshuLoginCommand, HandleXiaohongshuLoginAsync);
+        GroupCommands.MapExact(XiaohongshuLoginCommand, HandleXiaohongshuLoginAsync);
+        FriendCommands.MapExact(DouyinCookieCheckCommand, HandleDouyinCookieCheckAsync);
+        GroupCommands.MapExact(DouyinCookieCheckCommand, HandleDouyinCookieCheckAsync);
+        FriendCommands.MapExact(BilibiliCookieCheckCommand, HandleBilibiliCookieCheckAsync);
+        GroupCommands.MapExact(BilibiliCookieCheckCommand, HandleBilibiliCookieCheckAsync);
+        FriendCommands.MapExact(XiaohongshuCookieCheckCommand, HandleXiaohongshuCookieCheckAsync);
+        GroupCommands.MapExact(XiaohongshuCookieCheckCommand, HandleXiaohongshuCookieCheckAsync);
 
-        FriendCommands.MapPrefix(_config.ParseCommandPrefix, HandleParseCommandAsync);
-        GroupCommands.MapPrefix(_config.ParseCommandPrefix, HandleParseCommandAsync);
+        FriendCommands.MapWhen(IsParseCommand, HandleParseCommandAsync);
+        GroupCommands.MapWhen(IsParseCommand, HandleParseCommandAsync);
 
-        if (_config.AutoParseDouyinLinks || _config.AutoParseBilibiliLinks || _config.AutoParseXiaohongshuLinks)
-        {
-            FriendCommands.MapWhen(ShouldAutoParse, HandleAutoParseAsync);
-            GroupCommands.MapWhen(ShouldAutoParse, HandleAutoParseAsync);
-        }
+        FriendCommands.MapWhen(ShouldAutoParse, HandleAutoParseAsync);
+        GroupCommands.MapWhen(ShouldAutoParse, HandleAutoParseAsync);
 
-        BotLog.Info($"MyParser 已加载：抖音/Bilibili/小红书 解析启用。命令：#parser / #parse <链接> / {_config.BilibiliLoginCommand} / {_config.XiaohongshuLoginCommand}");
+        StartHotReloadWatchers();
+        BotLog.Info($"MyParser 已加载：抖音/Bilibili/小红书 解析启用。命令：#parser / {_config.ParseCommandPrefix} <链接> / {BilibiliLoginCommand} / {XiaohongshuLoginCommand}");
     }
 
     private async Task LogDouyinCookieLoginStatusAsync()
@@ -176,127 +174,243 @@ public sealed class MyParserPlugin : PluginBase
 
     private void LoadDouyinCookieFromPluginDirectory()
     {
-        var cookiePath = ResolveCookiePath(_config.DouyinCookieFileName, "douyin_cookie.txt");
+        var cookiePath = ResolveCookiePath(DouyinCookieFileName);
 
         if (!File.Exists(cookiePath))
         {
-            if (_config.CreateDouyinCookieFileIfMissing)
-            {
-                File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
-                BotLog.Info($"MyParser 已创建抖音 Cookie 文件：{cookiePath}");
-            }
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_config.DouyinCookie))
-        {
+            MyParserRuntime.DouyinCookie = string.Empty;
+            File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
+            BotLog.Info($"MyParser 已创建抖音 Cookie 文件：{cookiePath}");
             return;
         }
 
         var cookie = File.ReadAllText(cookiePath, Encoding.UTF8).Trim().TrimStart('\ufeff');
         if (string.IsNullOrWhiteSpace(cookie))
         {
+            MyParserRuntime.DouyinCookie = string.Empty;
             BotLog.Info($"MyParser DouyinCookie 为空；可编辑文件后重启：{cookiePath}");
             return;
         }
 
         if (!LooksLikeDouyinCookie(cookie))
         {
+            MyParserRuntime.DouyinCookie = string.Empty;
             BotLog.Warning($"MyParser 忽略无效 DouyinCookie 文件：{cookiePath}。请确保文件内容是浏览器 Request Headers 中 Cookie: 后面的完整值。");
             return;
         }
 
-        _config.DouyinCookie = cookie;
+        MyParserRuntime.DouyinCookie = cookie;
         BotLog.Info($"MyParser 已从插件目录读取 DouyinCookie：{cookiePath}");
     }
 
     private void LoadBilibiliCookieFromPluginDirectory()
     {
-        var cookiePath = ResolveCookiePath(_config.BilibiliCookieFileName, "bilibili_cookie.txt");
+        var cookiePath = ResolveCookiePath(BilibiliCookieFileName);
 
         if (!File.Exists(cookiePath))
         {
-            if (_config.CreateBilibiliCookieFileIfMissing)
-            {
-                File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
-                BotLog.Info($"MyParser 已创建 Bilibili Cookie 文件：{cookiePath}");
-            }
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_config.BilibiliCookie))
-        {
+            MyParserRuntime.BilibiliCookie = string.Empty;
+            File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
+            BotLog.Info($"MyParser 已创建 Bilibili Cookie 文件：{cookiePath}");
             return;
         }
 
         var cookie = File.ReadAllText(cookiePath, Encoding.UTF8).Trim().TrimStart('\ufeff');
         if (string.IsNullOrWhiteSpace(cookie))
         {
-            BotLog.Info($"MyParser BilibiliCookie 为空；可发送 {_config.BilibiliLoginCommand} 扫码登录，或编辑文件后重启：{cookiePath}");
+            MyParserRuntime.BilibiliCookie = string.Empty;
+            BotLog.Info($"MyParser BilibiliCookie 为空；可发送 {BilibiliLoginCommand} 扫码登录，或编辑文件后重启：{cookiePath}");
             return;
         }
 
         if (!BilibiliParser.LooksLikeBilibiliCookie(cookie))
         {
+            MyParserRuntime.BilibiliCookie = string.Empty;
             BotLog.Warning($"MyParser 忽略无效 BilibiliCookie 文件：{cookiePath}。请确保文件内容包含 SESSDATA/bili_jct 等 Cookie。");
             return;
         }
 
-        _config.BilibiliCookie = cookie;
+        MyParserRuntime.BilibiliCookie = cookie;
         BotLog.Info($"MyParser 已从插件目录读取 BilibiliCookie：{cookiePath}");
     }
 
     private void LoadXiaohongshuCookieFromPluginDirectory()
     {
-        var cookiePath = ResolveCookiePath(_config.XiaohongshuCookieFileName, "xiaohongshu_cookie.txt");
+        var cookiePath = ResolveCookiePath(XiaohongshuCookieFileName);
 
         if (!File.Exists(cookiePath))
         {
-            if (_config.CreateXiaohongshuCookieFileIfMissing)
-            {
-                File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
-                BotLog.Info($"MyParser 已创建小红书 Cookie 文件：{cookiePath}");
-            }
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_config.XiaohongshuCookie))
-        {
+            MyParserRuntime.XiaohongshuCookie = string.Empty;
+            File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
+            BotLog.Info($"MyParser 已创建小红书 Cookie 文件：{cookiePath}");
             return;
         }
 
         var cookie = File.ReadAllText(cookiePath, Encoding.UTF8).Trim().TrimStart('\ufeff');
         if (string.IsNullOrWhiteSpace(cookie))
         {
-            BotLog.Info($"MyParser XiaohongshuCookie 为空；可发送 {_config.XiaohongshuLoginCommand} 扫码登录，或编辑文件后重启：{cookiePath}");
+            MyParserRuntime.XiaohongshuCookie = string.Empty;
+            BotLog.Info($"MyParser XiaohongshuCookie 为空；可发送 {XiaohongshuLoginCommand} 扫码登录，或编辑文件后重启：{cookiePath}");
             return;
         }
 
-        _config.XiaohongshuCookie = cookie;
+        MyParserRuntime.XiaohongshuCookie = cookie;
         BotLog.Info($"MyParser 已从插件目录读取 XiaohongshuCookie：{cookiePath}");
     }
 
-    private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
+    private void NormalizeRuntimeDirectories()
     {
-        var pluginDir = Path.GetDirectoryName(Context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        var cookieDir = string.IsNullOrWhiteSpace(_config.CookieDirectory)
-            ? Path.Combine(pluginDir, "cookie")
-            : _config.CookieDirectory.Trim();
+        var pluginDir = GetPluginDirectory();
+        Directory.CreateDirectory(pluginDir);
 
-        if (!Path.IsPathRooted(cookieDir))
-        {
-            cookieDir = Path.Combine(pluginDir, cookieDir);
-        }
+        MyParserRuntime.DouyinCookie = string.Empty;
+        MyParserRuntime.BilibiliCookie = string.Empty;
+        MyParserRuntime.XiaohongshuCookie = string.Empty;
 
+        MyParserRuntime.DownloadDirectory = Path.Combine(pluginDir, "tmp", "douyin");
+        MyParserRuntime.BilibiliDownloadDirectory = Path.Combine(pluginDir, "tmp", "bilibili");
+        MyParserRuntime.XiaohongshuDownloadDirectory = Path.Combine(pluginDir, "tmp", "xiaohongshu");
+
+        Directory.CreateDirectory(Path.Combine(pluginDir, CookieDirectoryName));
+        Directory.CreateDirectory(MyParserRuntime.DownloadDirectory);
+        Directory.CreateDirectory(MyParserRuntime.BilibiliDownloadDirectory);
+        Directory.CreateDirectory(MyParserRuntime.XiaohongshuDownloadDirectory);
+    }
+
+    private string ResolveCookiePath(string fileName)
+    {
+        return ResolveCookiePath(GetPluginDirectory(), fileName);
+    }
+
+    internal static string ResolveCookiePath(string pluginDirectory, string fileName)
+    {
+        var cookieDir = Path.Combine(pluginDirectory, CookieDirectoryName);
         Directory.CreateDirectory(cookieDir);
-        var fileName = string.IsNullOrWhiteSpace(configuredFileName) ? defaultFileName : configuredFileName.Trim();
-        if (Path.IsPathRooted(fileName))
+        return Path.Combine(cookieDir, Path.GetFileName(fileName));
+    }
+
+    private void StartHotReloadWatchers()
+    {
+        StartConfigHotReloadWatcher();
+        StartCookieHotReloadWatcher();
+    }
+
+    private void StartConfigHotReloadWatcher()
+    {
+        var configPath = Context.Config.ConfigPath;
+        if (string.IsNullOrWhiteSpace(configPath))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? cookieDir);
-            return fileName;
+            return;
         }
 
-        return Path.Combine(cookieDir, fileName);
+        var fullPath = Path.GetFullPath(configPath);
+        var directory = Path.GetDirectoryName(fullPath);
+        var fileName = Path.GetFileName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(directory);
+        _configWatcher = new FileSystemWatcher(directory, fileName)
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime | NotifyFilters.FileName,
+            IncludeSubdirectories = false,
+            EnableRaisingEvents = true,
+        };
+        _configWatcher.Changed += (_, _) => ScheduleConfigReload();
+        _configWatcher.Created += (_, _) => ScheduleConfigReload();
+        _configWatcher.Renamed += (_, _) => ScheduleConfigReload();
+        BotLog.Info($"MyParser 配置热重载已启用：{fullPath}");
+    }
+
+    private void StartCookieHotReloadWatcher()
+    {
+        var cookieDir = Path.Combine(GetPluginDirectory(), CookieDirectoryName);
+        Directory.CreateDirectory(cookieDir);
+        _cookieWatcher = new FileSystemWatcher(cookieDir, "*.txt")
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime | NotifyFilters.FileName,
+            IncludeSubdirectories = false,
+            EnableRaisingEvents = true,
+        };
+        _cookieWatcher.Changed += (_, _) => ScheduleCookieReload();
+        _cookieWatcher.Created += (_, _) => ScheduleCookieReload();
+        _cookieWatcher.Deleted += (_, _) => ScheduleCookieReload();
+        _cookieWatcher.Renamed += (_, _) => ScheduleCookieReload();
+        BotLog.Info($"MyParser Cookie 热重载已启用：{cookieDir}");
+    }
+
+    private void ScheduleConfigReload()
+    {
+        ScheduleDebouncedReload(ref _configReloadDebounce, ReloadConfigNow, "配置");
+    }
+
+    private void ScheduleCookieReload()
+    {
+        ScheduleDebouncedReload(ref _cookieReloadDebounce, ReloadCookiesNow, "Cookie");
+    }
+
+    private void ScheduleDebouncedReload(ref CancellationTokenSource? debounce, Action reloadAction, string name)
+    {
+        lock (_reloadLock)
+        {
+            debounce?.Cancel();
+            debounce?.Dispose();
+            debounce = new CancellationTokenSource();
+            var token = debounce.Token;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(500, token);
+                    reloadAction();
+                }
+                catch (OperationCanceledException)
+                {
+                    // debounce
+                }
+                catch (Exception ex)
+                {
+                    BotLog.Warning($"MyParser {name}热重载失败：{ex.GetType().Name}: {ex.Message}");
+                }
+            }, CancellationToken.None);
+        }
+    }
+
+    private void ReloadConfigNow()
+    {
+        var updated = Context.Config.Load<MyParserConfig>();
+        ApplyConfigValues(_config, updated);
+        BotLog.Info("MyParser 配置已热重载。注意：命令热重载仅支持 #parse 前缀；登录/Cookie 检查命令为固定命令。 ");
+    }
+
+    private void ReloadCookiesNow()
+    {
+        LoadDouyinCookieFromPluginDirectory();
+        LoadBilibiliCookieFromPluginDirectory();
+        LoadXiaohongshuCookieFromPluginDirectory();
+        BotLog.Info("MyParser Cookie 文件已热重载。 ");
+    }
+
+    private static void ApplyConfigValues(MyParserConfig target, MyParserConfig source)
+    {
+        foreach (var property in typeof(MyParserConfig).GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public))
+        {
+            if (!property.CanRead || !property.CanWrite)
+            {
+                continue;
+            }
+
+            property.SetValue(target, property.GetValue(source));
+        }
+    }
+
+    private string GetPluginDirectory()
+    {
+        return string.IsNullOrWhiteSpace(Context.PluginDirectory)
+            ? Path.GetDirectoryName(Context.Config.ConfigPath) ?? AppContext.BaseDirectory
+            : Context.PluginDirectory;
     }
 
     private static bool LooksLikeDouyinCookie(string cookie)
@@ -308,6 +422,17 @@ public sealed class MyParserPlugin : PluginBase
 
     protected override Task OnUnloadAsync()
     {
+        _configReloadDebounce?.Cancel();
+        _configReloadDebounce?.Dispose();
+        _configReloadDebounce = null;
+        _cookieReloadDebounce?.Cancel();
+        _cookieReloadDebounce?.Dispose();
+        _cookieReloadDebounce = null;
+        _configWatcher?.Dispose();
+        _configWatcher = null;
+        _cookieWatcher?.Dispose();
+        _cookieWatcher = null;
+
         _douyinMessageHandler?.Dispose();
         _douyinMessageHandler = null;
         _bilibiliMessageHandler?.Dispose();
@@ -317,6 +442,8 @@ public sealed class MyParserPlugin : PluginBase
         _bilibiliProvider?.Dispose();
         _bilibiliProvider = null;
         _bilibiliArticleProvider = null;
+        _bilibiliBangumiProvider = null;
+        _bilibiliLiveProvider = null;
         _xiaohongshuMessageHandler?.Dispose();
         _xiaohongshuMessageHandler = null;
         _xiaohongshuProvider?.Dispose();
@@ -333,13 +460,20 @@ public sealed class MyParserPlugin : PluginBase
                    + "用法：\n"
                    + $"1. {_config.ParseCommandPrefix} <抖音/Bilibili/小红书 分享链接>\n"
                    + "2. 直接发送抖音/Bilibili/小红书链接可自动解析\n"
-                   + $"3. {_config.BilibiliLoginCommand}：Bilibili 扫码登录并保存 Cookie\n"
-                   + $"4. {_config.XiaohongshuLoginCommand}：小红书扫码登录并保存 Cookie\n"
-                   + $"5. {_config.DouyinCookieCheckCommand} / {_config.BilibiliCookieCheckCommand} / {_config.XiaohongshuCookieCheckCommand}：检查 Cookie 有效性\n\n"
-                   + "Cookie 文件：插件目录/cookie/douyin_cookie.txt、cookie/bilibili_cookie.txt、cookie/xiaohongshu_cookie.txt\n"
+                   + $"3. {BilibiliLoginCommand}：Bilibili 扫码登录并保存 Cookie\n"
+                   + $"4. {XiaohongshuLoginCommand}：小红书扫码登录并保存 Cookie\n"
+                   + $"5. {DouyinCookieCheckCommand} / {BilibiliCookieCheckCommand} / {XiaohongshuCookieCheckCommand}：检查 Cookie 有效性\n\n"
+                   + "Cookie 文件：插件目录/cookies/douyin.txt、cookies/bilibili.txt、cookies/xiaohongshu.txt\n"
                    + "Bilibili 说明：需要登录态；视频/音频流会分别下载，并用本地 ffmpeg 合并后发送。\n"
                    + "小红书说明：需要自行搭建 xhshow sign 服务，并在运行时配置 sign URL/token。";
         return Context.Message.ReplyAsync(message, help);
+    }
+
+    private bool IsParseCommand(IncomingMessage message)
+    {
+        var text = GetPlainText(message).TrimStart();
+        return !string.IsNullOrWhiteSpace(_config.ParseCommandPrefix)
+               && text.StartsWith(_config.ParseCommandPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ShouldAutoParse(IncomingMessage message)
@@ -357,11 +491,11 @@ public sealed class MyParserPlugin : PluginBase
                 || trimmed.StartsWith("#parser", StringComparison.OrdinalIgnoreCase)
                 || IsPluginResultMessage(trimmed)
                 || IsBilibiliPageTemplateLink(trimmed)
-                || trimmed.StartsWith(_config.BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(_config.XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(_config.DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(_config.BilibiliCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(_config.XiaohongshuCookieCheckCommand, StringComparison.OrdinalIgnoreCase))
+                || trimmed.StartsWith(BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(BilibiliCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(XiaohongshuCookieCheckCommand, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -404,7 +538,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private async Task HandleBilibiliLoginAsync(IncomingMessage message)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, _config.BilibiliLoginCommand))
+        if (!await EnsurePrivateAdminCommandAsync(message, BilibiliLoginCommand))
         {
             return;
         }
@@ -417,7 +551,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private async Task HandleXiaohongshuLoginAsync(IncomingMessage message)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, _config.XiaohongshuLoginCommand))
+        if (!await EnsurePrivateAdminCommandAsync(message, XiaohongshuLoginCommand))
         {
             return;
         }
@@ -430,7 +564,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private async Task HandleDouyinCookieCheckAsync(IncomingMessage message)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, _config.DouyinCookieCheckCommand))
+        if (!await EnsurePrivateAdminCommandAsync(message, DouyinCookieCheckCommand))
         {
             return;
         }
@@ -455,7 +589,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private async Task HandleBilibiliCookieCheckAsync(IncomingMessage message)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, _config.BilibiliCookieCheckCommand))
+        if (!await EnsurePrivateAdminCommandAsync(message, BilibiliCookieCheckCommand))
         {
             return;
         }
@@ -483,7 +617,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private async Task HandleXiaohongshuCookieCheckAsync(IncomingMessage message)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, _config.XiaohongshuCookieCheckCommand))
+        if (!await EnsurePrivateAdminCommandAsync(message, XiaohongshuCookieCheckCommand))
         {
             return;
         }

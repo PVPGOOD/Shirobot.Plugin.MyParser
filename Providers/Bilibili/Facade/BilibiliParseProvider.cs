@@ -14,8 +14,8 @@ internal sealed class BilibiliParseProvider(BilibiliParser parser) : IIncomingMe
 
     public bool CanHandle(string text)
     {
-        return Utilities.BilibiliUrlParser.ExtractBvid(text) is not null
-               || Utilities.BilibiliUrlParser.ExtractB23Url(text) is not null;
+        return BilibiliUrlParser.ExtractBvid(text) is not null
+               || BilibiliUrlParser.ExtractB23Url(text) is not null;
     }
 
     public string? ExtractParseText(IncomingMessage message)

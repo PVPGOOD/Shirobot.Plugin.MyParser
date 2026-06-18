@@ -118,7 +118,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
                 if (poll.IsLogin)
                 {
                     SaveXiaohongshuCookieToPluginDirectory();
-                    await ReplyAsync(message, $"小红书登录成功：{poll.UserName ?? "已登录"}。Cookie 已保存到插件 cookie 目录。");
+                    await ReplyAsync(message, $"小红书登录成功：{poll.UserName ?? "已登录"}。Cookie 已保存到插件 cookies/xiaohongshu.txt。");
                     return;
                 }
 
@@ -151,10 +151,13 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
                 BotLog.Info($"MyParser 小红书文件上传完成: note_id={result.NoteId}, {fileUploadInfo}");
             }
 
-            if (!result.LocalVideoRegisteredToHttpServer)
+            if (result.LocalVideoRegisteredToHttpServer && _config.DeleteLocalVideoDelaySeconds <= 0)
             {
-                LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "xiaohongshu");
+                _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
+                result.LocalVideoRegisteredToHttpServer = false;
             }
+
+            LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "xiaohongshu");
         }
         catch (Exception ex)
         {
@@ -164,9 +167,10 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
                 try
                 {
                     fileUploadInfo = await UploadVideoFileAsync(message, result);
-                    if (result.LocalVideoRegisteredToHttpServer)
+                    if (result.LocalVideoRegisteredToHttpServer && _config.DeleteLocalVideoDelaySeconds <= 0)
                     {
                         _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
+                        result.LocalVideoRegisteredToHttpServer = false;
                     }
 
                     LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "xiaohongshu");
@@ -247,7 +251,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private async Task SendCoverOrCardAsync(IncomingMessage message, XiaohongshuParseResult result)
     {
-        if (!_config.SendCoverWithVideoSegment || string.IsNullOrWhiteSpace(result.CoverUrl))
+        if (string.IsNullOrWhiteSpace(result.CoverUrl))
         {
             return;
         }
@@ -357,11 +361,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
             }
 
             var png = await _context.RenderControlPngAsync<XiaohongshuCard>(vm, new ControlRenderOptions(RenderTheme.Dark));
-            var dir = Path.Combine(ResolveDownloadDirectory(), "cards");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"xhs_card_{SanitizeLocalFileName(result.NoteId)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}.png");
-            await File.WriteAllBytesAsync(path, png);
-            BotLog.Info($"MyParser 小红书图文卡片渲染完成: note_id={result.NoteId}, comments={result.Comments.Count}, png_kb={png.Length / 1024d:F1}, file={path}");
+            BotLog.Info($"MyParser 小红书图文卡片渲染完成: note_id={result.NoteId}, comments={result.Comments.Count}, png_kb={png.Length / 1024d:F1}, mode=base64");
             return "base64://" + Convert.ToBase64String(png);
         }
         catch (Exception ex)
@@ -385,9 +385,9 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
                 request.Headers.TryAddWithoutValidation("User-Agent", XiaohongshuConstants.UserAgent);
                 request.Headers.TryAddWithoutValidation("Referer", referer ?? XiaohongshuConstants.Origin + "/");
                 request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
-                if (!string.IsNullOrWhiteSpace(_config.XiaohongshuCookie))
+                if (!string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuCookie))
                 {
-                    request.Headers.TryAddWithoutValidation("Cookie", _config.XiaohongshuCookie);
+                    request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.XiaohongshuCookie);
                 }
             });
     }
@@ -426,13 +426,13 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private void SaveXiaohongshuCookieToPluginDirectory()
     {
-        var path = ResolveCookiePath(_config.XiaohongshuCookieFileName, "xiaohongshu_cookie.txt");
-        File.WriteAllText(path, _config.XiaohongshuCookie ?? string.Empty, Encoding.UTF8);
+        var path = ResolveCookiePath("xiaohongshu.txt");
+        File.WriteAllText(path, MyParserRuntime.XiaohongshuCookie ?? string.Empty, Encoding.UTF8);
     }
 
-    private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
+    private string ResolveCookiePath(string fileName)
     {
-        return MessageHandlerCommon.ResolveCookiePath(_context, _config, configuredFileName, defaultFileName);
+        return MessageHandlerCommon.ResolveCookiePath(_context, fileName);
     }
 
     private Task ReplyAsync(IncomingMessage message, string text)
@@ -495,9 +495,9 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private string ResolveDownloadDirectory()
     {
-        return Path.IsPathRooted(_config.XiaohongshuDownloadDirectory)
-            ? _config.XiaohongshuDownloadDirectory
-            : Path.Combine(AppContext.BaseDirectory, _config.XiaohongshuDownloadDirectory);
+        return Path.IsPathRooted(MyParserRuntime.XiaohongshuDownloadDirectory)
+            ? MyParserRuntime.XiaohongshuDownloadDirectory
+            : Path.Combine(AppContext.BaseDirectory, MyParserRuntime.XiaohongshuDownloadDirectory);
     }
 
     private static string FormatCount(long value)

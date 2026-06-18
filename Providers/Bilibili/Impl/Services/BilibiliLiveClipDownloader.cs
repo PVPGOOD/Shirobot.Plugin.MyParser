@@ -4,8 +4,8 @@ using System.Net;
 using System.Text;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
+using Shirobot.Plugin.MyParser.Services;
 using ShiroBot.SDK.Abstractions;
-using ShiroBot.SDK.Core;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 
@@ -47,7 +47,7 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-        await CutStaticLiveClipAsync(ffmpeg, playlist.Path, result.SourceUrl, outputPath, timeoutSeconds, linkedCts.Token);
+        await CutStaticLiveClipAsync(ffmpeg, playlist.Path, outputPath, timeoutSeconds, linkedCts.Token);
         await ValidateClipAsync(outputPath, cancellationToken);
 
         BotLog.Info($"MyParser Bilibili 直播回看片段生成完成: room_id={result.RealRoomId}, requested_duration={durationSeconds}s, actual_seconds={playlist.ActualSeconds:F1}, segments={playlist.SelectedSegments}/{playlist.TotalSegments}, stream={stream.Protocol}/{stream.Format}/{stream.Codec}, qn={stream.CurrentQn}, file_mb={new FileInfo(outputPath).Length / 1024d / 1024d:F2}, file={outputPath}");
@@ -145,7 +145,7 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
             }
 
             staticPlaylist.AppendLine(FormattableString.Invariant($"#EXTINF:{segment.DurationSeconds:0.###},"));
-            staticPlaylist.AppendLine(ToM3u8LocalPath(localPath));
+            staticPlaylist.AppendLine(ToM3U8LocalPath(localPath));
         }
 
         staticPlaylist.AppendLine("#EXT-X-ENDLIST");
@@ -162,9 +162,9 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
         request.Headers.TryAddWithoutValidation("Referer", string.IsNullOrWhiteSpace(referer) ? "https://live.bilibili.com/" : referer);
         request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
         request.Headers.TryAddWithoutValidation("Accept", "application/vnd.apple.mpegurl, application/x-mpegURL, */*");
-        if (!string.IsNullOrWhiteSpace(config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
 
         using var response = await PlaylistHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -195,7 +195,7 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
         return Encoding.UTF8.GetString(output.ToArray());
     }
 
-    private async Task CutStaticLiveClipAsync(string ffmpeg, string playlistPath, string referer, string outputPath, int timeoutSeconds, CancellationToken cancellationToken)
+    private async Task CutStaticLiveClipAsync(string ffmpeg, string playlistPath, string outputPath, int timeoutSeconds, CancellationToken cancellationToken)
     {
         var psi = new ProcessStartInfo
         {
@@ -254,50 +254,52 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
             throw new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。");
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
-        request.Headers.TryAddWithoutValidation("Referer", string.IsNullOrWhiteSpace(referer) ? "https://live.bilibili.com/" : referer);
-        request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
-        request.Headers.TryAddWithoutValidation("Accept", "*/*");
-        if (!string.IsNullOrWhiteSpace(config.BilibiliCookie))
-        {
-            request.Headers.TryAddWithoutValidation("Cookie", config.BilibiliCookie);
-        }
+        var logger = new DownloadProgressLogger(config.LogDownloadProgress, config.DownloadProgressLogIntervalSeconds, "MyParser Bilibili 直播", "segment");
+        var downloader = new MyParser.Services.Downloader(PlaylistHttp, logger);
+        var request = new HttpRangeDownloadRequest(
+            url,
+            localPath,
+            Path.GetFileName(localPath),
+            remainingBytes,
+            true,
+            1,
+            4,
+            (method, range) => CreateSegmentRequest(method, url, referer, range),
+            statusCode => new BilibiliParseException($"直播分片下载 HTTP {(int)statusCode}"),
+            _ => new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。"),
+            () => new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。"),
+            (index, statusCode) => new BilibiliParseException($"直播分片 {index} 不支持 Range：HTTP {(int)statusCode}"),
+            (index, contentRange) => new BilibiliParseException($"直播分片 {index} Content-Range 不匹配：{contentRange}"),
+            (index, copied, expected) => new BilibiliParseException($"直播分片 {index} 大小不匹配：{copied} != {expected}"),
+            (actual, expected) => new BilibiliParseException($"直播分片合并大小不匹配：{actual} != {expected}"));
 
-        using var response = await PlaylistHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentLength is > 0 && response.Content.Headers.ContentLength.Value > remainingBytes)
-        {
-            throw new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。");
-        }
-
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = File.Create(localPath);
-        var buffer = new byte[128 * 1024];
-        long total = 0;
-        while (true)
-        {
-            var read = await input.ReadAsync(buffer, cancellationToken);
-            if (read == 0)
-            {
-                break;
-            }
-
-            total += read;
-            if (total > remainingBytes)
-            {
-                throw new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。");
-            }
-
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        }
-
+        var total = await downloader.DownloadAsync(request, cancellationToken);
         if (total <= 0)
         {
             throw new BilibiliParseException("直播分片下载到空文件。");
         }
 
         return total;
+    }
+
+    private static HttpRequestMessage CreateSegmentRequest(HttpMethod method, string url, string referer, string? range)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
+        request.Headers.TryAddWithoutValidation("Referer", string.IsNullOrWhiteSpace(referer) ? "https://live.bilibili.com/" : referer);
+        request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
+        request.Headers.TryAddWithoutValidation("Accept", "*/*");
+        if (!string.IsNullOrWhiteSpace(range))
+        {
+            request.Headers.TryAddWithoutValidation("Range", range);
+        }
+
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
+        }
+
+        return request;
     }
 
     private static string GuessSegmentExtension(string uri)
@@ -307,7 +309,7 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
         return string.IsNullOrWhiteSpace(extension) ? ".ts" : extension;
     }
 
-    private static string ToM3u8LocalPath(string localPath)
+    private static string ToM3U8LocalPath(string localPath)
     {
         return Path.GetFullPath(localPath).Replace('\\', '/');
     }
@@ -486,11 +488,11 @@ internal sealed class BilibiliLiveClipDownloader(MyParserConfig config)
 
     private string ResolveClipDirectory(BilibiliLiveParseResult result)
     {
-        var root = string.IsNullOrWhiteSpace(config.BilibiliDownloadDirectory)
+        var root = string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliDownloadDirectory)
             ? Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "bilibili")
-            : Path.IsPathRooted(config.BilibiliDownloadDirectory)
-                ? config.BilibiliDownloadDirectory
-                : Path.Combine(AppContext.BaseDirectory, config.BilibiliDownloadDirectory);
+            : Path.IsPathRooted(MyParserRuntime.BilibiliDownloadDirectory)
+                ? MyParserRuntime.BilibiliDownloadDirectory
+                : Path.Combine(AppContext.BaseDirectory, MyParserRuntime.BilibiliDownloadDirectory);
         return Path.Combine(root, "live-clips", SanitizeFileName(result.RealRoomId, 40));
     }
 

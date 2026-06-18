@@ -309,8 +309,6 @@ internal sealed partial class BilibiliArticleParser(HttpClient http, MyParserCon
         }
     }
 
-    private static string ExtractOpusNodesText(JsonElement? nodes) => ExtractOpusNodesInfo(nodes).Text;
-
     private static OpusTextInfo ExtractOpusNodesInfo(JsonElement? nodes)
     {
         var parts = new List<string>();
@@ -719,9 +717,9 @@ internal sealed partial class BilibiliArticleParser(HttpClient http, MyParserCon
         request.Headers.TryAddWithoutValidation("Referer", referer);
         request.Headers.TryAddWithoutValidation("Origin", BilibiliConstants.Origin);
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        if (!string.IsNullOrWhiteSpace(config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
     }
 

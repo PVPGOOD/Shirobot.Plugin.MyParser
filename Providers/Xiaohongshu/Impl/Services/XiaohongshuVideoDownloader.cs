@@ -13,21 +13,29 @@ internal sealed class XiaohongshuVideoDownloader(MyParserConfig config, HttpClie
     public async Task<(string FileUri, string LocalPath)> DownloadVideoAsync(XiaohongshuParseResult result, CancellationToken cancellationToken = default)
     {
         var selected = result.SelectedVideo ?? throw new XiaohongshuParseException("没有可下载的小红书视频地址。");
-        var candidates = (selected.Urls.Count > 0 ? selected.Urls : [selected.Url]).Where(i => !string.IsNullOrWhiteSpace(i)).Distinct().ToArray();
-        Exception? lastError = null;
-        foreach (var url in candidates)
+        var cacheKey = $"xiaohongshu:{result.NoteId}:{selected.FormatId}:{selected.Width}x{selected.Height}:{selected.BitrateKbps:0}";
+        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, async () =>
         {
-            try
+            var candidates = (selected.Urls.Count > 0 ? selected.Urls : [selected.Url]).Where(i => !string.IsNullOrWhiteSpace(i)).Distinct().ToArray();
+            Exception? lastError = null;
+            foreach (var url in candidates)
             {
-                return await DownloadCandidateAsync(url, result, selected, cancellationToken);
+                try
+                {
+                    return await DownloadCandidateAsync(url, result, selected, cancellationToken);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or XiaohongshuParseException)
+                {
+                    lastError = ex;
+                }
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or XiaohongshuParseException)
-            {
-                lastError = ex;
-            }
-        }
 
-        throw new XiaohongshuParseException("小红书视频下载失败：" + (lastError?.Message ?? "无可用地址"));
+            throw new XiaohongshuParseException("小红书视频下载失败：" + (lastError?.Message ?? "无可用地址"));
+        });
+
+        result.LocalVideoFileUri = downloaded.FileUri;
+        result.LocalVideoPath = downloaded.LocalPath;
+        return downloaded;
     }
 
     private async Task<(string FileUri, string LocalPath)> DownloadCandidateAsync(string url, XiaohongshuParseResult result, XiaohongshuVideoFormat format, CancellationToken cancellationToken)
@@ -37,16 +45,16 @@ internal sealed class XiaohongshuVideoDownloader(MyParserConfig config, HttpClie
         Directory.CreateDirectory(dir);
         var ext = string.IsNullOrWhiteSpace(format.Ext) ? "mp4" : format.Ext.Trim('.');
         var path = Path.Combine(dir, $"xhs_{SanitizeFileName(result.NoteId)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.{ext}");
-        var minParallelBytes = Math.Max(1, config.ParallelDownloadMinMegabytes) * 1024L * 1024L;
+        const long minParallelBytes = 1;
         var maxSegments = Math.Clamp(config.ParallelDownloadMaxSegments, 2, 64);
         var segmentCount = Math.Clamp(config.ParallelDownloadSegments, 2, maxSegments);
-        var downloader = new HttpRangeDownloader(http, _progressLogger);
+        var downloader = new MyParser.Services.Downloader(http, _progressLogger);
         var request = new HttpRangeDownloadRequest(
             url,
             path,
             result.NoteId,
             maxBytes,
-            config.EnableParallelVideoDownload,
+            true,
             minParallelBytes,
             segmentCount,
             (method, range) => CreateVideoRequest(method, url, result, range),
@@ -80,9 +88,9 @@ internal sealed class XiaohongshuVideoDownloader(MyParserConfig config, HttpClie
             request.Headers.TryAddWithoutValidation("Range", range);
         }
 
-        if (!string.IsNullOrWhiteSpace(config.XiaohongshuCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.XiaohongshuCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.XiaohongshuCookie);
         }
 
         return request;
@@ -90,14 +98,14 @@ internal sealed class XiaohongshuVideoDownloader(MyParserConfig config, HttpClie
 
     private string ResolveDownloadDirectory()
     {
-        if (string.IsNullOrWhiteSpace(config.XiaohongshuDownloadDirectory))
+        if (string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuDownloadDirectory))
         {
             return Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "xiaohongshu");
         }
 
-        return Path.IsPathRooted(config.XiaohongshuDownloadDirectory)
-            ? config.XiaohongshuDownloadDirectory
-            : Path.Combine(AppContext.BaseDirectory, config.XiaohongshuDownloadDirectory);
+        return Path.IsPathRooted(MyParserRuntime.XiaohongshuDownloadDirectory)
+            ? MyParserRuntime.XiaohongshuDownloadDirectory
+            : Path.Combine(AppContext.BaseDirectory, MyParserRuntime.XiaohongshuDownloadDirectory);
     }
 
     private static string SanitizeFileName(string value)

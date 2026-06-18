@@ -19,21 +19,29 @@ internal sealed class DouyinVideoDownloader(MyParserConfig config, HttpClient ht
             throw new DouyinParseException("没有可下载的视频地址。");
         }
 
-        var candidates = BuildVideoDownloadCandidates(result, quality).Distinct().ToArray();
-        Exception? lastError = null;
-        foreach (var url in candidates)
+        var cacheKey = $"douyin:{result.AwemeId}:{quality.GearName}:{quality.Ratio}:{quality.Codec}";
+        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, async () =>
         {
-            try
+            var candidates = BuildVideoDownloadCandidates(result, quality).Distinct().ToArray();
+            Exception? lastError = null;
+            foreach (var url in candidates)
             {
-                return await DownloadVideoCandidateAsync(url, result, cancellationToken);
+                try
+                {
+                    return await DownloadVideoCandidateAsync(url, result, cancellationToken);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or DouyinParseException)
+                {
+                    lastError = ex;
+                }
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or DouyinParseException)
-            {
-                lastError = ex;
-            }
-        }
 
-        throw new DouyinParseException("视频下载失败：" + (lastError?.Message ?? "无可用地址"));
+            throw new DouyinParseException("视频下载失败：" + (lastError?.Message ?? "无可用地址"));
+        });
+
+        result.LocalVideoFileUri = downloaded.FileUri;
+        result.LocalVideoPath = downloaded.LocalPath;
+        return downloaded;
     }
 
     private async Task<(string FileUri, string LocalPath)> DownloadVideoCandidateAsync(string url, DouyinParseResult result, CancellationToken cancellationToken)
@@ -45,16 +53,16 @@ internal sealed class DouyinVideoDownloader(MyParserConfig config, HttpClient ht
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, $"douyin_{SanitizeFileName(result.AwemeId)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.mp4");
 
-        var minParallelBytes = Math.Max(1, config.ParallelDownloadMinMegabytes) * 1024L * 1024L;
+        const long minParallelBytes = 1;
         var maxSegments = Math.Clamp(config.ParallelDownloadMaxSegments, 2, 64);
         var segmentCount = Math.Clamp(config.ParallelDownloadSegments, 2, maxSegments);
-        var downloader = new HttpRangeDownloader(http, _progressLogger);
+        var downloader = new MyParser.Services.Downloader(http, _progressLogger);
         var request = new HttpRangeDownloadRequest(
             url,
             path,
             result.AwemeId,
             maxBytes,
-            config.EnableParallelVideoDownload,
+            true,
             minParallelBytes,
             segmentCount,
             (method, range) => CreateVideoRequest(method, url, result, range),
@@ -86,9 +94,9 @@ internal sealed class DouyinVideoDownloader(MyParserConfig config, HttpClient ht
             request.Headers.TryAddWithoutValidation("Range", range);
         }
 
-        if (!string.IsNullOrWhiteSpace(config.DouyinCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.DouyinCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.DouyinCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.DouyinCookie);
         }
 
         return request;
@@ -117,14 +125,14 @@ internal sealed class DouyinVideoDownloader(MyParserConfig config, HttpClient ht
 
     private string ResolveDownloadDirectory()
     {
-        if (string.IsNullOrWhiteSpace(config.DownloadDirectory))
+        if (string.IsNullOrWhiteSpace(MyParserRuntime.DownloadDirectory))
         {
             return Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "douyin");
         }
 
-        return Path.IsPathRooted(config.DownloadDirectory)
-            ? config.DownloadDirectory
-            : Path.Combine(AppContext.BaseDirectory, config.DownloadDirectory);
+        return Path.IsPathRooted(MyParserRuntime.DownloadDirectory)
+            ? MyParserRuntime.DownloadDirectory
+            : Path.Combine(AppContext.BaseDirectory, MyParserRuntime.DownloadDirectory);
     }
 
     private static string SanitizeFileName(string value)

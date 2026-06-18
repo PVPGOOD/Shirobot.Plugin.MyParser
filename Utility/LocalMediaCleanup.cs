@@ -9,6 +9,35 @@ internal static class LocalMediaCleanup
             return;
         }
 
+        var delaySeconds = Math.Max(0, config.DeleteLocalVideoDelaySeconds);
+        if (delaySeconds <= 0 && MyParserRuntime.IsCachedVideoPath(localPath))
+        {
+            // Give concurrent duplicate requests time to reuse/send the same cached file.
+            delaySeconds = 30;
+        }
+
+        if (delaySeconds <= 0)
+        {
+            DeleteLocalVideoNow(config, localPath, provider);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                DeleteLocalVideoNow(config, localPath, provider);
+            }
+            catch
+            {
+                // Cleanup is best-effort and must never affect message sending.
+            }
+        });
+    }
+
+    private static void DeleteLocalVideoNow(MyParserConfig config, string localPath, string provider)
+    {
         try
         {
             var fullPath = Path.GetFullPath(localPath);
@@ -18,6 +47,7 @@ internal static class LocalMediaCleanup
             }
 
             TryDeleteFile(fullPath);
+            MyParserRuntime.RemoveCachedVideoPath(fullPath);
             if (string.Equals(provider, "bilibili", StringComparison.OrdinalIgnoreCase))
             {
                 var dir = Path.GetDirectoryName(fullPath);
@@ -39,9 +69,9 @@ internal static class LocalMediaCleanup
     {
         var roots = new[]
         {
-            ResolveRoot(config.DownloadDirectory, Path.Combine("downloads", "MyParser", "douyin")),
-            ResolveRoot(config.BilibiliDownloadDirectory, Path.Combine("downloads", "MyParser", "bilibili")),
-            ResolveRoot(config.XiaohongshuDownloadDirectory, Path.Combine("downloads", "MyParser", "xiaohongshu")),
+            ResolveRoot(MyParserRuntime.DownloadDirectory, Path.Combine("downloads", "MyParser", "douyin")),
+            ResolveRoot(MyParserRuntime.BilibiliDownloadDirectory, Path.Combine("downloads", "MyParser", "bilibili")),
+            ResolveRoot(MyParserRuntime.XiaohongshuDownloadDirectory, Path.Combine("downloads", "MyParser", "xiaohongshu")),
             Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser"),
         };
 

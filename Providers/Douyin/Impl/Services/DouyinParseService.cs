@@ -13,7 +13,7 @@ using static Shirobot.Plugin.MyParser.Providers.Douyin.Utilities.DouyinUrlParser
 
 namespace Shirobot.Plugin.MyParser.Providers.Douyin.Impl.Services;
 
-internal sealed class DouyinParseService(MyParserConfig config, HttpClient http, IReadOnlyList<IDouyinWorkParser> workParsers)
+internal sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWorkParser> workParsers)
 {
     public async Task<DouyinParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)
     {
@@ -333,9 +333,9 @@ internal sealed class DouyinParseService(MyParserConfig config, HttpClient http,
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyDefaultHeaders(request, referer);
-        if (!string.IsNullOrWhiteSpace(config.DouyinCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.DouyinCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.DouyinCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.DouyinCookie);
         }
 
         using var response = await http.SendAsync(request, cancellationToken);

@@ -50,7 +50,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
         var user = note.GetPropertyOrDefault("user") ?? note.GetPropertyOrDefault("userInfo") ?? note.GetPropertyOrDefault("user_info");
         var authorId = user?.GetStringOrDefault("userId") ?? user?.GetStringOrDefault("user_id") ?? XiaohongshuUrlParser.ExtractUserIdFromUrl(resolvedUrl) ?? FindUserIdInObject(note);
         var tags = ExtractTags(note).ToList();
-        if (string.IsNullOrWhiteSpace(xsecToken) && !string.IsNullOrWhiteSpace(_config.XiaohongshuCookie) && _config.XiaohongshuCookie.Contains("a1=", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(xsecToken) && !string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuCookie) && MyParserRuntime.XiaohongshuCookie.Contains("a1=", StringComparison.OrdinalIgnoreCase))
         {
             var recovered = await RecoverXsecTokenAsync(resolvedNoteId, authorId, title, description, tags, cancellationToken);
             if (recovered is not null)
@@ -65,7 +65,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
         var images = ExtractImages(note, html).ToList();
         var coverUrl = images.LastOrDefault()?.Url ?? MetaContent(html, "og:image");
         var comments = new List<XiaohongshuComment>();
-        if (_config.XiaohongshuFetchComments && !string.IsNullOrWhiteSpace(xsecToken) && LooksLikeLoginCookie(_config.XiaohongshuCookie))
+        if (_config.XiaohongshuFetchComments && !string.IsNullOrWhiteSpace(xsecToken) && LooksLikeLoginCookie(MyParserRuntime.XiaohongshuCookie))
         {
             try
             {
@@ -110,17 +110,17 @@ internal sealed partial class XiaohongshuParser : IDisposable
 
     public async Task<XiaohongshuLoginStatus> CheckLoginStatusAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(_config.XiaohongshuCookie))
+        if (string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuCookie))
         {
             return new XiaohongshuLoginStatus(false, null, null, "未配置 XiaohongshuCookie");
         }
 
-        if (!_config.XiaohongshuCookie.Contains("web_session=", StringComparison.OrdinalIgnoreCase))
+        if (!MyParserRuntime.XiaohongshuCookie.Contains("web_session=", StringComparison.OrdinalIgnoreCase))
         {
             return new XiaohongshuLoginStatus(false, null, null, "Cookie 缺少 web_session");
         }
 
-        if (!_config.XiaohongshuCookie.Contains("a1=", StringComparison.OrdinalIgnoreCase))
+        if (!MyParserRuntime.XiaohongshuCookie.Contains("a1=", StringComparison.OrdinalIgnoreCase))
         {
             return new XiaohongshuLoginStatus(false, null, null, "Cookie 缺少 a1，无法稳定生成 xhshow 签名");
         }
@@ -129,7 +129,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
         {
             try
             {
-                using var request = await CreateSignedRequestAsync(HttpMethod.Get, uri, _config.XiaohongshuCookie, null, null, XiaohongshuConstants.Origin + "/", cancellationToken);
+                using var request = await CreateSignedRequestAsync(HttpMethod.Get, uri, MyParserRuntime.XiaohongshuCookie, null, null, XiaohongshuConstants.Origin + "/", cancellationToken);
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 {
@@ -182,7 +182,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
 
     public async Task<XiaohongshuQrLoginSession> GenerateQrLoginSessionAsync(CancellationToken cancellationToken = default)
     {
-        var cookie = string.IsNullOrWhiteSpace(_config.XiaohongshuCookie) ? MakeGuestCookie() : EnsureGuestCookieParts(_config.XiaohongshuCookie);
+        var cookie = string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuCookie) ? MakeGuestCookie() : EnsureGuestCookieParts(MyParserRuntime.XiaohongshuCookie);
         const string uri = "/api/sns/web/v1/login/qrcode/create";
         var payload = new Dictionary<string, object?>();
         using var request = await CreateSignedRequestAsync(HttpMethod.Post, uri, cookie, payload, null, XiaohongshuConstants.Origin + "/", cancellationToken);
@@ -241,7 +241,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
 
             cookies.TryAdd("xsecappid", "xhs-pc-web");
             cookie = CookieDictToHeader(cookies);
-            _config.XiaohongshuCookie = cookie;
+            MyParserRuntime.XiaohongshuCookie = cookie;
             var status = await CheckLoginStatusAsync(cancellationToken);
             return new XiaohongshuQrPollResult(0, status.Message, status.IsLogin, status.NeedVerify, cookie, status.UserName);
         }
@@ -312,9 +312,9 @@ internal sealed partial class XiaohongshuParser : IDisposable
         request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
         request.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
         request.Headers.TryAddWithoutValidation("Referer", referer);
-        if (!string.IsNullOrWhiteSpace(_config.XiaohongshuCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.XiaohongshuCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", _config.XiaohongshuCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.XiaohongshuCookie);
         }
     }
 
@@ -348,7 +348,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
                 ["xsec_token"] = xsecToken,
             };
             var referer = $"{XiaohongshuConstants.Origin}/explore/{noteId}?xsec_token={Uri.EscapeDataString(xsecToken)}&xsec_source={Uri.EscapeDataString(xsecSource)}";
-            using var request = await CreateSignedRequestAsync(HttpMethod.Get, uri, _config.XiaohongshuCookie, null, parameters, referer, cancellationToken);
+            using var request = await CreateSignedRequestAsync(HttpMethod.Get, uri, MyParserRuntime.XiaohongshuCookie, null, parameters, referer, cancellationToken);
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if ((int)response.StatusCode is 461 or 471)
             {
@@ -418,7 +418,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
         for (var page = 0; page < 3; page++)
         {
             var parameters = new Dictionary<string, object?> { ["num"] = 30, ["cursor"] = cursor, ["user_id"] = userId, ["image_scenes"] = "FD_WM_WEBP" };
-            using var request = await CreateSignedRequestAsync(HttpMethod.Get, uri, _config.XiaohongshuCookie, null, parameters, $"{XiaohongshuConstants.Origin}/user/profile/{userId}", cancellationToken);
+            using var request = await CreateSignedRequestAsync(HttpMethod.Get, uri, MyParserRuntime.XiaohongshuCookie, null, parameters, $"{XiaohongshuConstants.Origin}/user/profile/{userId}", cancellationToken);
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -473,7 +473,7 @@ internal sealed partial class XiaohongshuParser : IDisposable
             ["geo"] = string.Empty,
             ["image_formats"] = new[] { "jpg", "webp", "avif" },
         };
-        using var request = await CreateSignedRequestAsync(HttpMethod.Post, uri, _config.XiaohongshuCookie, payload, null, XiaohongshuConstants.Origin + "/", cancellationToken);
+        using var request = await CreateSignedRequestAsync(HttpMethod.Post, uri, MyParserRuntime.XiaohongshuCookie, payload, null, XiaohongshuConstants.Origin + "/", cancellationToken);
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {

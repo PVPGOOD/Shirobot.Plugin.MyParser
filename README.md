@@ -77,7 +77,7 @@ Shirobot.Plugin.MyParser 是 [ShiroBot](https://github.com/ShirokaProject/ShiroB
 2. 打开浏览器开发者工具，进入 Network / 网络面板。
 3. 刷新页面或打开任意作品请求。
 4. 在请求头中找到 `Cookie`，复制 `Cookie:` 后面的完整值。
-5. 写入插件目录下的 `douyin_cookie.txt`，或写入运行时配置项 `DouyinCookie`。
+5. 写入插件目录下的 `cookies/douyin.txt`。
 6. 重启或热重载插件。
 
 建议 Cookie 至少包含 `sessionid`、`ttwid` 等字段。Cookie 属于账号凭据，不要提交到仓库、日志、截图或公开聊天。
@@ -105,7 +105,7 @@ Bilibili 支持插件内扫码登录：
 1. Owner/Admin 私信机器人发送 `#bili-login`。
 2. 使用 Bilibili App 扫描机器人发送的二维码。
 3. 在 App 中确认登录。
-4. 插件会将 Cookie 保存到运行时配置和插件目录下的 `bilibili_cookie.txt`。
+4. 插件会将 Cookie 保存到运行时配置和插件目录下的 `cookies/bilibili.txt`。
 
 也可以手动获取 Cookie：
 
@@ -113,7 +113,7 @@ Bilibili 支持插件内扫码登录：
 2. 打开开发者工具，进入 Network / 网络面板。
 3. 刷新页面，选择任意 `bilibili.com` 或 `api.bilibili.com` 请求。
 4. 复制请求头中的完整 `Cookie`。
-5. 写入 `bilibili_cookie.txt`，或写入运行时配置项 `BilibiliCookie`。
+5. 写入插件目录下的 `cookies/bilibili.txt`。
 
 Bilibili 视频解析需要登录态，Cookie 通常需要包含 `SESSDATA`、`bili_jct` 等字段。视频与音频流会分别下载，并用本地 `ffmpeg` 合并后发送。
 
@@ -155,7 +155,7 @@ xiaohongshu_comment_count = 10
 1. 确保 `xhshow` sign 服务已启动，且运行时配置中已填写 `XiaohongshuSignServerUrl` / `XiaohongshuSignServerToken`。
 2. Owner/Admin 私信机器人发送 `#xhs-login`。
 3. 使用小红书 App 扫描二维码并确认。
-4. 如果流程可用，插件会将 Cookie 保存到运行时配置和插件目录下的 `xiaohongshu_cookie.txt`。
+4. 如果流程可用，插件会将 Cookie 保存到运行时配置和插件目录下的 `cookies/xiaohongshu.txt`。
 
 推荐方式：浏览器复制小红书 Cookie：
 
@@ -165,7 +165,7 @@ xiaohongshu_comment_count = 10
 4. 选择 `xiaohongshu.com` 或 `edith.xiaohongshu.com` 相关请求。
 5. 在 Request Headers / 请求头中找到 `Cookie`。
 6. 复制 `Cookie:` 后面的完整值。
-7. 写入插件目录下的 `xiaohongshu_cookie.txt`，或写入运行时配置项 `XiaohongshuCookie`。
+7. 写入插件目录下的 `cookies/xiaohongshu.txt`。
 8. 重启或热重载插件。
 
 小红书 Cookie 建议包含：
@@ -196,11 +196,6 @@ a1=...; web_session=...; webId=...; xsecappid=xhs-pc-web
   "AutoParseBilibiliLinks": true,
   "AutoParseXiaohongshuLinks": false,
   "ParseCommandPrefix": "#parse",
-  "BilibiliLoginCommand": "#bili-login",
-  "XiaohongshuLoginCommand": "#xhs-login",
-  "DouyinCookieCheckCommand": "#douyin-cookie-check",
-  "BilibiliCookieCheckCommand": "#bili-cookie-check",
-  "XiaohongshuCookieCheckCommand": "#xhs-cookie-check",
   "XiaohongshuSignServerUrl": "",
   "XiaohongshuSignServerToken": "",
   "XiaohongshuFetchComments": true,
@@ -213,7 +208,7 @@ a1=...; web_session=...; webId=...; xsecappid=xhs-pc-web
   "UploadVideoAsFile": false,
   "AllowLanAccessToLocalVideoHttpServer": false,
   "DeleteLocalVideoAfterSend": true,
-  "IncludeLocalFilePath": false,
+  "DeleteLocalVideoDelaySeconds": 0,
   "MaxImagesToShow": 6
 }
 ```
@@ -280,6 +275,17 @@ dotnet build -c Debug
 ```
 
 > 注意：Rider 的 `.env` 通常只注入运行进程，不一定会注入 MSBuild 项目评估阶段。因此不要只依赖 `.env` 控制插件输出目录；请使用 `Directory.Build.local.props` 指定 `HostPluginDir`。
+
+## 热重载
+
+插件运行时会监听以下文件变化并自动重载：
+
+- 插件目录下的 `config.toml`：更新普通运行配置，例如自动解析开关、下载策略、sign 服务等。
+- 插件目录下的 `cookies/douyin.txt`、`cookies/bilibili.txt`、`cookies/xiaohongshu.txt`：更新各平台 Cookie。
+
+Cookie 文件清空或删除后，对应平台登录态会立即清空；文件重新创建或写入有效 Cookie 后会自动生效。
+
+> 固定命令（如 `#bili-login`、`#xhs-login`、`#douyin-cookie-check`、`#bili-cookie-check`、`#xhs-cookie-check`）不走配置项。`#parse` 前缀支持随配置热重载。
 
 ## 部署
 

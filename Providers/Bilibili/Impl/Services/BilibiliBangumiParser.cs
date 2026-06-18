@@ -208,9 +208,9 @@ internal sealed class BilibiliBangumiParser(HttpClient http, MyParserConfig conf
         request.Headers.TryAddWithoutValidation("Referer", "https://www.bilibili.com/bangumi/");
         request.Headers.TryAddWithoutValidation("Origin", BilibiliConstants.Origin);
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        if (!string.IsNullOrWhiteSpace(config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
 
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);

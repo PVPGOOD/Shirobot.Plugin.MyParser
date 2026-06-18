@@ -1,20 +1,14 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text;
-using Net.Codecrete.QrCodeGenerator;
 using ShiroBot.AvaloniaSdk;
-using Shirobot.Plugin.MyParser.Parsing;
 using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
 using Shirobot.Plugin.MyParser.Utility;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
-using ShiroBot.SDK.Core;
 using ShiroBot.SDK.Plugin;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
@@ -95,13 +89,13 @@ private async Task SendArticleForwardAsync(IncomingMessage message, BilibiliArti
         switch (message)
         {
             case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+                await context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
                 break;
             case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+                await context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
                 break;
             default:
-                await _context.Message.ReplyAsync(message, forward);
+                await context.Message.ReplyAsync(message, forward);
                 break;
         }
     }
@@ -118,20 +112,20 @@ private async Task SendArticleForwardAsync(IncomingMessage message, BilibiliArti
         switch (message)
         {
             case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, segment);
+                await context.Message.SendGroupMessageAsync(group.Group.GroupId, segment);
                 break;
             case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, segment);
+                await context.Message.SendPrivateMessageAsync(friend.SenderId, segment);
                 break;
             default:
-                await _context.Message.ReplyAsync(message, segment);
+                await context.Message.ReplyAsync(message, segment);
                 break;
         }
     }
 
     private async Task<string> BuildArticleDocumentCardUriAsync(BilibiliArticleParseResult result)
     {
-        if (_context.Render is null)
+        if (context.Render is null)
         {
             return string.Empty;
         }
@@ -196,12 +190,8 @@ private async Task SendArticleForwardAsync(IncomingMessage message, BilibiliArti
                 StatsText = $"{FormatCount(result.ViewCount)}阅读 · {FormatCount(result.LikeCount)}赞 · {FormatCount(result.CoinCount)}投币 · {FormatCount(result.FavoriteCount)}收藏 · {FormatCount(result.ReplyCount)}评论 · {result.ImageUrls.Count}图",
                 Blocks = blocks,
             };
-            var png = await _context.RenderControlPngAsync<BiliArticleDocument>(vm, new ControlRenderOptions(RenderTheme.Dark));
-            var dir = Path.Combine(ResolveCoverDownloadDirectory(), "article-documents");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"bilibili_article_document_{SanitizeLocalFileName(result.IsOpus ? result.OpusId ?? "opus" : "cv" + result.Cvid)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}.png");
-            await File.WriteAllBytesAsync(path, png);
-            BotLog.Info($"MyParser Bilibili 完整文档卡片渲染完成: id={(result.IsOpus ? result.OpusId : result.Cvid)}, blocks={blocks.Count}, height={canvasHeight}, png_kb={png.Length / 1024d:F1}, file={path}");
+            var png = await context.RenderControlPngAsync<BiliArticleDocument>(vm, new ControlRenderOptions(RenderTheme.Dark));
+            BotLog.Info($"MyParser Bilibili 完整文档卡片渲染完成: id={(result.IsOpus ? result.OpusId : result.Cvid)}, blocks={blocks.Count}, height={canvasHeight}, png_kb={png.Length / 1024d:F1}, mode=base64");
             return "base64://" + Convert.ToBase64String(png);
         }
         catch (Exception ex)

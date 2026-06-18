@@ -19,7 +19,7 @@ internal sealed class LocalVideoHttpServer : IDisposable
     private readonly string _publicBaseUrl;
     private readonly bool _allowLanClients;
 
-    public int Port { get; }
+    private int Port { get; }
 
     public LocalVideoHttpServer(string host, int port, string? publicBaseUrl, bool allowLanClients = false)
     {
@@ -161,7 +161,7 @@ internal sealed class LocalVideoHttpServer : IDisposable
             var filePath = registeredFile.Path;
             var info = new FileInfo(filePath);
             var length = info.Length;
-            var range = ParseRange(request.Headers.TryGetValue("range", out var rangeHeader) ? rangeHeader : null, length);
+            var range = ParseRange(request.Headers.GetValueOrDefault("range"), length);
             var start = range.Start;
             var end = range.End;
             var count = end - start + 1;
@@ -301,7 +301,7 @@ internal sealed class LocalVideoHttpServer : IDisposable
             return null;
         }
 
-        var lines = raw[..headerEnd].Split("\r\n", StringSplitOptions.None);
+        var lines = raw[..headerEnd].Split("\r\n");
         if (lines.Length == 0)
         {
             return null;

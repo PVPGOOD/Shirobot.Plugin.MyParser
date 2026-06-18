@@ -215,9 +215,9 @@ internal sealed class BilibiliLiveParser(HttpClient http, MyParserConfig config)
         request.Headers.TryAddWithoutValidation("Referer", referer);
         request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        if (!string.IsNullOrWhiteSpace(config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
     }
 }

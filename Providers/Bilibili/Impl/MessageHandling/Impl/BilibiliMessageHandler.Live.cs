@@ -1,21 +1,11 @@
 using System.Diagnostics;
-using System.Net;
 using System.Text;
-using Net.Codecrete.QrCodeGenerator;
-using ShiroBot.AvaloniaSdk;
-using Shirobot.Plugin.MyParser.Parsing;
-using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
 using Shirobot.Plugin.MyParser.Utility;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
-using ShiroBot.SDK.Core;
-using ShiroBot.SDK.Plugin;
+
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
 
@@ -23,16 +13,16 @@ internal sealed partial class BilibiliMessageHandler
 {
 private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliLiveParseResult result)
     {
-        if (!_config.SendBilibiliLiveReplayClip)
+        if (!config.SendBilibiliLiveReplayClip)
         {
             return;
         }
 
         try
         {
-            var clipSeconds = Math.Clamp(_config.BilibiliLiveReplayClipSeconds, 1, 30);
+            var clipSeconds = Math.Clamp(config.BilibiliLiveReplayClipSeconds, 1, 30);
             await ReplyAsync(message, $"正在从当前直播流可回溯分片中截取最近约 {clipSeconds} 秒，请稍候…");
-            var downloader = new BilibiliLiveClipDownloader(_config);
+            var downloader = new BilibiliLiveClipDownloader(config);
             var clip = await downloader.DownloadRecentClipAsync(result, progress => ReplyAsync(message,
                 $"直播回溯分片已冻结：当前 m3u8 提供 {progress.SelectedSegments}/{progress.TotalSegments} 段，约 {progress.ActualSeconds:F0} 秒；正在用 ffmpeg 封装 MP4…"));
             await ReplyAsync(message, "直播回看片段已封装完成，正在发送到 QQ…");
@@ -53,8 +43,8 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
     private string BuildLocalVideoSegmentUri(string localPath, BilibiliLiveParseResult result)
     {
         var fileSize = new FileInfo(localPath).Length;
-        var useBase64 = _config.SendVideoSegmentAsBase64
-                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, _config.VideoSegmentBase64MaxMegabytes);
+        var useBase64 = config.SendVideoSegmentAsBase64
+                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, config.VideoSegmentBase64MaxMegabytes);
         string videoUri;
         string uriMode;
         if (useBase64)
@@ -62,7 +52,7 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
             videoUri = "base64://" + Convert.ToBase64String(File.ReadAllBytes(localPath));
             uriMode = "base64";
         }
-        else if (_config.UseLocalHttpServerForLargeVideoSegment)
+        else if (config.UseLocalHttpServerForLargeVideoSegment)
         {
             videoUri = GetLocalVideoHttpServer().RegisterFile(localPath);
             result.LocalClipRegisteredToHttpServer = true;
@@ -86,21 +76,21 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         {
             case GroupIncomingMessage group:
             {
-                var response = await _context.Message.SendGroupMessageAsync(group.Group.GroupId, videoSegment);
+                var response = await context.Message.SendGroupMessageAsync(group.Group.GroupId, videoSegment);
                 BotLog.Info($"MyParser Bilibili 直播片段 VideoSegment 发送接口完成: room_id={result.RealRoomId}, scene=group, group_id={group.Group.GroupId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
                 EnsureVideoSendAccepted(response.MessageSeq, "group");
                 break;
             }
             case FriendIncomingMessage friend:
             {
-                var response = await _context.Message.SendPrivateMessageAsync(friend.SenderId, videoSegment);
+                var response = await context.Message.SendPrivateMessageAsync(friend.SenderId, videoSegment);
                 BotLog.Info($"MyParser Bilibili 直播片段 VideoSegment 发送接口完成: room_id={result.RealRoomId}, scene=friend, user_id={friend.SenderId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
                 EnsureVideoSendAccepted(response.MessageSeq, "friend");
                 break;
             }
             default:
             {
-                await _context.Message.ReplyAsync(message, videoSegment);
+                await context.Message.ReplyAsync(message, videoSegment);
                 break;
             }
         }
@@ -108,13 +98,13 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
 
     private void CleanupLocalLiveClipAfterSend(BilibiliLiveParseResult result)
     {
-        if (result.LocalClipRegisteredToHttpServer)
+        if (result.LocalClipRegisteredToHttpServer && config.DeleteLocalVideoDelaySeconds <= 0)
         {
             _localVideoHttpServer?.UnregisterFile(result.LocalClipPath);
             result.LocalClipRegisteredToHttpServer = false;
         }
 
-        LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalClipPath, "bilibili");
+        LocalMediaCleanup.DeleteLocalVideoIfConfigured(config, result.LocalClipPath, "bilibili");
     }
 
     private async Task SendLiveForwardAsync(IncomingMessage message, BilibiliLiveParseResult result)
@@ -167,13 +157,13 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         switch (message)
         {
             case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+                await context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
                 break;
             case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+                await context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
                 break;
             default:
-                await _context.Message.ReplyAsync(message, forward);
+                await context.Message.ReplyAsync(message, forward);
                 break;
         }
     }

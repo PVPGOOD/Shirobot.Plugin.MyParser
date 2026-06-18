@@ -6,33 +6,18 @@ namespace Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
 
 public sealed class BiliCardViewModel
 {
-    public BiliCardViewModel()
-    {
-        Cover = LoadDesignBackground();
-        Avatar = LoadDesignAvatar();
-        Title = "这是视频标题";
-        Description = "这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述";
-        AuthorName = "UP主名字";
-        AuthorMeta = "UP主简介UP主简介";
-        DurationText = "12:34";
-        TagsText = "#标签1 #标签2 #标签3 #标签4 #标签5";
-        LikeCount = "1.2K";
-        CoinCount = "345";
-        CollectCount = "678";
-        ShareCount = "90";
-    }
-    public Bitmap? Cover { get; init; }
-    public Bitmap? Avatar { get; init; }
-    public string Title { get; init; } = string.Empty;
-    public string Description { get; init; } = string.Empty;
-    public string AuthorName { get; init; } = string.Empty;
-    public string AuthorMeta { get; init; } = string.Empty;
-    public string DurationText { get; init; } = string.Empty;
-    public string TagsText { get; init; } = string.Empty;
-    public string LikeCount { get; init; } = string.Empty;
-    public string CoinCount { get; init; } = string.Empty;
-    public string CollectCount { get; init; } = string.Empty;
-    public string ShareCount { get; init; } = string.Empty;
+    public string Title { get; init; } = "这是视频标题";
+    public string Description { get; init; } = "这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述这是视频描述";
+    public string AuthorName { get; init; } = "UP主名字";
+    public string AuthorMeta { get; init; } = "UP主简介UP主简介";
+    public string DurationText { get; init; } = "12:34";
+    public string TagsText { get; init; } = "#标签1 #标签2 #标签3 #标签4 #标签5";
+    public string LikeCount { get; init; } = "1.2K";
+    public string CoinCount { get; init; } = "345";
+    public string CollectCount { get; init; } = "678";
+    public string ShareCount { get; init; } = "90";
+    public Bitmap? Cover { get; init; } = LoadDesignBackground();
+    public Bitmap? Avatar { get; init; } = LoadDesignAvatar();
 
     private static Bitmap? LoadDesignBackground([CallerFilePath] string sourceFilePath = "")
     {

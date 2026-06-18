@@ -62,27 +62,9 @@ internal static class MessageHandlerCommon
         });
     }
 
-    public static string ResolveCookiePath(IBotContext context, MyParserConfig config, string? configuredFileName, string defaultFileName)
+    public static string ResolveCookiePath(IBotContext context, string fileName)
     {
-        var pluginDir = Path.GetDirectoryName(context.Config.ConfigPath) ?? AppContext.BaseDirectory;
-        var cookieDir = string.IsNullOrWhiteSpace(config.CookieDirectory)
-            ? Path.Combine(pluginDir, "cookie")
-            : config.CookieDirectory.Trim();
-
-        if (!Path.IsPathRooted(cookieDir))
-        {
-            cookieDir = Path.Combine(pluginDir, cookieDir);
-        }
-
-        Directory.CreateDirectory(cookieDir);
-        var fileName = string.IsNullOrWhiteSpace(configuredFileName) ? defaultFileName : configuredFileName.Trim();
-        if (Path.IsPathRooted(fileName))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(fileName) ?? cookieDir);
-            return fileName;
-        }
-
-        return Path.Combine(cookieDir, fileName);
+        return Path.Combine(context.PluginDirectory, fileName);
     }
 
     public static async Task<string> UploadLocalVideoFileAsync(
@@ -127,7 +109,7 @@ internal static class MessageHandlerCommon
         }
     }
 
-    public static void EnsureFileUploadAccepted(string? fileId, string scene, string uploadMode)
+    private static void EnsureFileUploadAccepted(string? fileId, string scene, string uploadMode)
     {
         if (string.IsNullOrWhiteSpace(fileId))
         {

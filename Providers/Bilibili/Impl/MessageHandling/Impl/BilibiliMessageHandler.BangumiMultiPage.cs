@@ -1,21 +1,9 @@
-using System.Diagnostics;
-using System.Net;
+
 using System.Text;
-using Net.Codecrete.QrCodeGenerator;
-using ShiroBot.AvaloniaSdk;
-using Shirobot.Plugin.MyParser.Parsing;
 using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
-using Shirobot.Plugin.MyParser.Utility;
 using ShiroBot.Model.Common;
-using ShiroBot.SDK.Abstractions;
-using ShiroBot.SDK.Core;
-using ShiroBot.SDK.Plugin;
+
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
 
@@ -60,13 +48,13 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         switch (message)
         {
             case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+                await context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
                 break;
             case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+                await context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
                 break;
             default:
-                await _context.Message.ReplyAsync(message, forward);
+                await context.Message.ReplyAsync(message, forward);
                 break;
         }
 
@@ -128,7 +116,7 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         headerSegments.Add(new TextOutgoingSegment(BuildMultiPageHeaderText(result)));
         forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, headerSegments));
 
-        var coverImageLimit = Math.Max(0, _config.BilibiliMultiPageCoverImageLimit);
+        var coverImageLimit = Math.Max(0, config.BilibiliMultiPageCoverImageLimit);
         var pages = result.Pages.ToArray();
         var pageCoverInputs = pages
             .Where(page => page.Page <= coverImageLimit && !string.IsNullOrWhiteSpace(page.CoverUrl))
@@ -165,13 +153,13 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         switch (message)
         {
             case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+                await context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
                 break;
             case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+                await context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
                 break;
             default:
-                await _context.Message.ReplyAsync(message, forward);
+                await context.Message.ReplyAsync(message, forward);
                 break;
         }
 

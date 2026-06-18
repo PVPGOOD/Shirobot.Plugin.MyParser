@@ -98,10 +98,13 @@ internal sealed class DouyinMessageHandler : IDisposable
                         }
                     }
 
-                    if (!result.LocalVideoRegisteredToHttpServer)
+                    if (result.LocalVideoRegisteredToHttpServer && _config.DeleteLocalVideoDelaySeconds <= 0)
                     {
-                        LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "douyin");
+                        _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
+                        result.LocalVideoRegisteredToHttpServer = false;
                     }
+
+                    LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "douyin");
                     await TryReactToSourceMessageAsync(message, "426");
                     return;
                 }
@@ -115,9 +118,10 @@ internal sealed class DouyinMessageHandler : IDisposable
                             fileUploadInfo = await UploadVideoFileAsync(message, result);
                             fileUploaded = true;
                             BotLog.Info($"MyParser VideoSegment 失败后文件上传完成: aweme_id={result.AwemeId}, {fileUploadInfo}");
-                            if (result.LocalVideoRegisteredToHttpServer)
+                            if (result.LocalVideoRegisteredToHttpServer && _config.DeleteLocalVideoDelaySeconds <= 0)
                             {
                                 _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
+                                result.LocalVideoRegisteredToHttpServer = false;
                             }
 
                             LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "douyin");
@@ -304,7 +308,7 @@ private void LogFinalVideoFileInfo(DouyinParseResult result)
 
     private Task StartSendCoverMessageAsync(IncomingMessage message, DouyinParseResult result)
     {
-        if (!_config.SendCoverWithVideoSegment || string.IsNullOrWhiteSpace(result.CoverUrl))
+        if (string.IsNullOrWhiteSpace(result.CoverUrl))
         {
             return Task.CompletedTask;
         }
@@ -568,7 +572,7 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
             var avatarBitmap = !string.IsNullOrWhiteSpace(avatarImage.LocalPath)
                 ? RenderBitmapUtilities.DecodeImageFileForRender(avatarImage.LocalPath)
                 : RenderBitmapUtilities.DecodeBase64ImageForRender(avatarImage.Uri);
-            BotLog.Info($"MyParser 封面卡片纹理准备: aweme_id={result.AwemeId}, local_path={coverImage.LocalPath ?? ""}, bitmap={(coverBitmap is null ? "null" : "ok")}, avatar_path={avatarImage.LocalPath ?? ""}, avatar={(avatarBitmap is null ? "null" : "ok")}");
+            BotLog.Info($"MyParser 封面卡片纹理准备: aweme_id={result.AwemeId}, bitmap={(coverBitmap is null ? "null" : "ok")}, avatar={(avatarBitmap is null ? "null" : "ok")}, mode=base64");
 
             var vm = new DouyinCardViewModel
             {
@@ -591,9 +595,8 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
                 TagsText = BuildTagsText(result),
             };
             var png = await _context.RenderControlPngAsync<DouyinCard>(vm, new ControlRenderOptions(RenderTheme.Auto));
-            var cardPath = await SaveRenderedCoverCardAsync(result, png);
             var uri = "base64://" + Convert.ToBase64String(png);
-            BotLog.Info($"MyParser 封面卡片渲染完成: aweme_id={result.AwemeId}, cover_url={result.CoverUrl}, png_kb={png.Length / 1024d:F1}, view={typeof(DouyinCard).FullName}, rendered_path={cardPath}");
+            BotLog.Info($"MyParser 封面卡片渲染完成: aweme_id={result.AwemeId}, cover_url={result.CoverUrl}, png_kb={png.Length / 1024d:F1}, view={typeof(DouyinCard).FullName}, mode=base64");
             return uri;
         }
         catch (Exception ex)
@@ -601,15 +604,6 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
             BotLog.Warning($"MyParser 封面卡片渲染失败，直接发送原始封面: aweme_id={result.AwemeId}, cover_url={result.CoverUrl}, error={ex.Message}");
             return coverUri;
         }
-    }
-
-    private static async Task<string> SaveRenderedCoverCardAsync(DouyinParseResult result, byte[] png)
-    {
-        var dir = Path.Combine(ResolveCoverDownloadDirectory(), "cards");
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, $"douyin_card_{SanitizeLocalFileName(result.AwemeId)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}.png");
-        await File.WriteAllBytesAsync(path, png);
-        return path;
     }
 
 private static string BuildCoverCardSubtitle(DouyinParseResult result)
@@ -730,9 +724,9 @@ private static string BuildCoverCardSubtitle(DouyinParseResult result)
             });
     }
 
-    private static string ResolveCoverDownloadDirectory()
+    private string ResolveCoverDownloadDirectory()
     {
-        return Path.Combine(AppContext.BaseDirectory, "downloads", "MyParser", "douyin");
+        return MyParserRuntime.DownloadDirectory;
     }
 
     private static string SanitizeLocalFileName(string value)
@@ -827,11 +821,6 @@ private static void LogCoverImageInfo(DouyinParseResult result, string mode, lon
                     sb.AppendLine(fileUploaded
                         ? $"文件上传：已上传为{fileUploadInfo}"
                         : $"文件上传：失败或未执行；原因：{TrimLine(fileUploadInfo ?? "未知", 80)}");
-                }
-
-                if (_config.IncludeLocalFilePath && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
-                {
-                    sb.AppendLine($"本地文件：{result.LocalVideoPath}");
                 }
             }
 

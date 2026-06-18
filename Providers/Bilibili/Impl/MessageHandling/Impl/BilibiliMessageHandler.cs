@@ -1,52 +1,34 @@
 using System.Diagnostics;
-using System.Net;
 using System.Text;
 using Net.Codecrete.QrCodeGenerator;
-using ShiroBot.AvaloniaSdk;
-using Shirobot.Plugin.MyParser.Parsing;
-using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels;
-using Shirobot.Plugin.MyParser.Providers.Bilibili.Views;
-using Shirobot.Plugin.MyParser.Utility;
 using ShiroBot.Model.Common;
+using Shirobot.Plugin.MyParser.Parsing;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Facade;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
+using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
+using Shirobot.Plugin.MyParser.Utility;
 using ShiroBot.SDK.Abstractions;
-using ShiroBot.SDK.Core;
 using ShiroBot.SDK.Plugin;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
 
-internal sealed partial class BilibiliMessageHandler : IDisposable
+internal sealed partial class BilibiliMessageHandler(
+    IBotContext context,
+    MyParserConfig config,
+    ParseProviderRegistry providerRegistry,
+    BilibiliParseProvider bilibiliProvider)
+    : IDisposable
 {
     private static readonly HttpClient CoverHttp = RemoteImageFetchService.CreateImageHttpClient();
 
-    private readonly IBotContext _context;
-    private readonly MyParserConfig _config;
-    private readonly ParseProviderRegistry _providerRegistry;
-    private readonly BilibiliParseProvider _bilibiliProvider;
     private LocalVideoHttpServer? _localVideoHttpServer;
-
-    public BilibiliMessageHandler(
-        IBotContext context,
-        MyParserConfig config,
-        ParseProviderRegistry providerRegistry,
-        BilibiliParseProvider bilibiliProvider)
-    {
-        _context = context;
-        _config = config;
-        _providerRegistry = providerRegistry;
-        _bilibiliProvider = bilibiliProvider;
-    }
 
     public async Task ParseAndReplyAsync(IncomingMessage message, string text)
     {
         try
         {
             await TryReactToSourceMessageAsync(message, "351");
-            var media = await _providerRegistry.ParseAsync(text);
+            var media = await providerRegistry.ParseAsync(text);
             if (media.ProviderPayload is BilibiliArticleParseResult article)
             {
                 await SendArticleForwardAsync(message, article);
@@ -90,7 +72,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
             }
 
             LogBilibiliQualityInfo(result);
-            if (!_config.SendVideoAsFile || !result.IsVideo)
+            if (!config.SendVideoAsFile || !result.IsVideo)
             {
                 await ReplyAsync(message, FormatBilibiliResult(result, videoDownloadAttempted: false));
                 await TryReactToSourceMessageAsync(message, "426");
@@ -99,7 +81,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
             var videoSent = false;
             var fileUploaded = false;
-            string? videoSendError = null;
+            string? videoSendError;
             string? fileUploadInfo = null;
 
             try
@@ -109,7 +91,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
                 await SendVideoMessageAsync(message, result, videoSegment);
                 videoSent = true;
 
-                if (_config.UploadVideoAsFile && !_config.UploadVideoAsFileOnlyOnVideoSendFailure && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
+                if (config is { UploadVideoAsFile: true, UploadVideoAsFileOnlyOnVideoSendFailure: false } && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
                 {
                     fileUploadInfo = await UploadVideoFileAsync(message, result);
                     fileUploaded = true;
@@ -124,7 +106,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
             {
                 videoSendError = ex.Message;
                 BotLog.Warning($"MyParser Bilibili VideoSegment 发送未确认: bvid={result.Bvid}, detail={ex.Message}");
-                if (_config.UploadVideoAsFile && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
+                if (config.UploadVideoAsFile && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
                 {
                     try
                     {
@@ -171,14 +153,14 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private Task TryReactToSourceMessageAsync(IncomingMessage message, string faceId)
     {
-        return MessageHandlerCommon.ReactAsync(_context, message, faceId, "Bilibili");
+        return MessageHandlerCommon.ReactAsync(context, message, faceId, "Bilibili");
     }
 
     public async Task HandleLoginAsync(IncomingMessage message)
     {
         try
         {
-            var session = await _bilibiliProvider.Parser.GenerateQrLoginSessionAsync();
+            var session = await bilibiliProvider.Parser.GenerateQrLoginSessionAsync();
             await ReplyAsync(message,
                 "Bilibili 扫码登录\n"
                 + "请用哔哩哔哩 App 扫描下面二维码，并在 3 分钟内确认登录。\n"
@@ -189,12 +171,12 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
             while (!cts.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
-                var poll = await _bilibiliProvider.Parser.PollQrLoginAsync(session.QrcodeKey, cts.Token);
+                var poll = await bilibiliProvider.Parser.PollQrLoginAsync(session.QrcodeKey, cts.Token);
                 switch (poll.Code)
                 {
                     case 0 when poll.IsLogin:
                         SaveBilibiliCookieToPluginDirectory();
-                        await ReplyAsync(message, $"Bilibili 登录成功，Cookie 已保存到插件 cookie 目录。");
+                        await ReplyAsync(message, $"Bilibili 登录成功，Cookie 已保存到插件 cookies/bilibili.txt。");
                         return;
                     case 86038:
                         await ReplyAsync(message, "Bilibili 登录二维码已过期，请重新发送登录命令。");
@@ -223,15 +205,14 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private async Task<VideoOutgoingSegment> BuildVideoSegmentAsync(BilibiliParseResult result)
     {
-        var (fileUri, localPath) = await _bilibiliProvider.Parser.DownloadVideoAsync(result);
+        var (fileUri, localPath) = await bilibiliProvider.Parser.DownloadVideoAsync(result);
         result.LocalVideoFileUri = fileUri;
         result.LocalVideoPath = localPath;
         LogFinalVideoFileInfo(result);
 
         var fileSize = new FileInfo(localPath).Length;
-        var base64LimitBytes = Math.Max(0, _config.VideoSegmentBase64MaxMegabytes) * 1024L * 1024L;
-        var useBase64 = _config.SendVideoSegmentAsBase64
-                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, _config.VideoSegmentBase64MaxMegabytes);
+        var useBase64 = config.SendVideoSegmentAsBase64
+                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, config.VideoSegmentBase64MaxMegabytes);
         string videoUri;
         string uriMode;
         if (useBase64)
@@ -239,7 +220,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
             videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
             uriMode = "base64";
         }
-        else if (_config.UseLocalHttpServerForLargeVideoSegment)
+        else if (config.UseLocalHttpServerForLargeVideoSegment)
         {
             videoUri = GetLocalVideoHttpServer().RegisterFile(localPath);
             result.LocalVideoRegisteredToHttpServer = true;
@@ -251,14 +232,14 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
             uriMode = "file";
         }
 
-        BotLog.Info($"MyParser Bilibili VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, base64_limit_mb={_config.VideoSegmentBase64MaxMegabytes}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
-        var thumbUri = _config.IncludeVideoThumbUri && !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
+        BotLog.Info($"MyParser Bilibili VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, base64_limit_mb={config.VideoSegmentBase64MaxMegabytes}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
+        var thumbUri = config.IncludeVideoThumbUri && !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
         return new VideoOutgoingSegment(videoUri, thumbUri);
     }
 
     private Task StartSendCoverMessageAsync(IncomingMessage message, BilibiliParseResult result)
     {
-        if (!_config.SendCoverWithVideoSegment || string.IsNullOrWhiteSpace(result.CoverUrl))
+        if (string.IsNullOrWhiteSpace(result.CoverUrl))
         {
             return Task.CompletedTask;
         }
@@ -275,21 +256,21 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
         {
             case GroupIncomingMessage group:
             {
-                var response = await _context.Message.SendGroupMessageAsync(group.Group.GroupId, segments);
+                var response = await context.Message.SendGroupMessageAsync(group.Group.GroupId, segments);
                 BotLog.Info($"MyParser Bilibili VideoSegment 发送接口完成: bvid={result.Bvid}, scene=group, group_id={group.Group.GroupId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
                 EnsureVideoSendAccepted(response.MessageSeq, "group");
                 break;
             }
             case FriendIncomingMessage friend:
             {
-                var response = await _context.Message.SendPrivateMessageAsync(friend.SenderId, segments);
+                var response = await context.Message.SendPrivateMessageAsync(friend.SenderId, segments);
                 BotLog.Info($"MyParser Bilibili VideoSegment 发送接口完成: bvid={result.Bvid}, scene=friend, user_id={friend.SenderId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
                 EnsureVideoSendAccepted(response.MessageSeq, "friend");
                 break;
             }
             default:
             {
-                await _context.Message.ReplyAsync(message, segments);
+                await context.Message.ReplyAsync(message, segments);
                 break;
             }
         }
@@ -297,7 +278,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private void EnsureVideoSendAccepted(long messageSeq, string scene)
     {
-        if (_config.TreatZeroMessageSeqAsVideoSendFailure && messageSeq <= 0)
+        if (config.TreatZeroMessageSeqAsVideoSendFailure && messageSeq <= 0)
         {
             throw new InvalidOperationException($"VideoSegment 发送返回 message_seq={messageSeq}，未取得有效消息序号，改为文件上传。scene={scene}");
         }
@@ -305,13 +286,13 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private void CleanupLocalVideoAfterSend(BilibiliParseResult result)
     {
-        if (result.LocalVideoRegisteredToHttpServer)
+        if (result.LocalVideoRegisteredToHttpServer && config.DeleteLocalVideoDelaySeconds <= 0)
         {
             _localVideoHttpServer?.UnregisterFile(result.LocalVideoPath);
             result.LocalVideoRegisteredToHttpServer = false;
         }
 
-        LocalMediaCleanup.DeleteLocalVideoIfConfigured(_config, result.LocalVideoPath, "bilibili");
+        LocalMediaCleanup.DeleteLocalVideoIfConfigured(config, result.LocalVideoPath, "bilibili");
     }
 
     private async Task SendQrImageAsync(IncomingMessage message, string text, string fileName)
@@ -321,13 +302,13 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
         switch (message)
         {
             case GroupIncomingMessage group:
-                await _context.Message.SendGroupMessageAsync(group.Group.GroupId, segment);
+                await context.Message.SendGroupMessageAsync(group.Group.GroupId, segment);
                 break;
             case FriendIncomingMessage friend:
-                await _context.Message.SendPrivateMessageAsync(friend.SenderId, segment);
+                await context.Message.SendPrivateMessageAsync(friend.SenderId, segment);
                 break;
             default:
-                await _context.Message.ReplyAsync(message, segment);
+                await context.Message.ReplyAsync(message, segment);
                 break;
         }
     }
@@ -345,18 +326,18 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private Task<string> UploadVideoFileAsync(IncomingMessage message, BilibiliParseResult result)
     {
-        return MessageHandlerCommon.UploadLocalVideoFileAsync(_context, _config, message, result.LocalVideoPath, "Bilibili", result.Bvid);
+        return MessageHandlerCommon.UploadLocalVideoFileAsync(context, config, message, result.LocalVideoPath, "Bilibili", result.Bvid);
     }
 
     private void SaveBilibiliCookieToPluginDirectory()
     {
-        var path = ResolveCookiePath(_config.BilibiliCookieFileName, "bilibili_cookie.txt");
-        File.WriteAllText(path, _config.BilibiliCookie ?? string.Empty, Encoding.UTF8);
+        var path = ResolveCookiePath("bilibili.txt");
+        File.WriteAllText(path, MyParserRuntime.BilibiliCookie, Encoding.UTF8);
     }
 
-    private string ResolveCookiePath(string? configuredFileName, string defaultFileName)
+    private string ResolveCookiePath(string fileName)
     {
-        return MessageHandlerCommon.ResolveCookiePath(_context, _config, configuredFileName, defaultFileName);
+        return MessageHandlerCommon.ResolveCookiePath(context, fileName);
     }
 
     private Task ReplyAsync(IncomingMessage message, string text)
@@ -366,7 +347,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private Task<SendMessageResult> SendReplyAsync(IncomingMessage message, string text)
     {
-        return MessageHandlerCommon.ReplyTextAsync(_context, _config, message, text);
+        return MessageHandlerCommon.ReplyTextAsync(context, config, message, text);
     }
 
     private static string NormalizePageReplyText(string text)
@@ -377,7 +358,8 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
     private void SubscribeBilibiliPageReply(BilibiliMultiPageParseResult result, long promptMessageSeq)
     {
         IReplySubscription? subscription = null;
-        subscription = _context.Message.SubscribeReply(promptMessageSeq, TimeSpan.FromMinutes(10), async reply =>
+        var subscription1 = subscription;
+        context.Message.SubscribeReply(promptMessageSeq, TimeSpan.FromMinutes(10), async reply =>
         {
             var text = reply switch
             {
@@ -399,19 +381,19 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
                 return;
             }
 
-            subscription?.Dispose();
+            subscription1?.Dispose();
             await ParseAndReplyAsync(reply, $"https://www.bilibili.com/video/{result.Bvid}/?p={page}");
         }, disposeOnReply: false);
     }
 
     private LocalVideoHttpServer GetLocalVideoHttpServer()
     {
-        return _localVideoHttpServer ??= new LocalVideoHttpServer(_config.LocalVideoHttpHost, _config.LocalVideoHttpPort, _config.LocalVideoHttpPublicBaseUrl, _config.AllowLanAccessToLocalVideoHttpServer);
+        return _localVideoHttpServer ??= new LocalVideoHttpServer(config.LocalVideoHttpHost, config.LocalVideoHttpPort, config.LocalVideoHttpPublicBaseUrl, config.AllowLanAccessToLocalVideoHttpServer);
     }
 
     private void LogFinalVideoFileInfo(BilibiliParseResult result)
     {
-        if (!_config.LogSelectedQualityInfo)
+        if (!config.LogSelectedQualityInfo)
         {
             return;
         }
@@ -456,35 +438,6 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
         TempIncomingMessage temp => temp.SenderId,
         _ => 0,
     };
-
-    private string FormatBilibiliLiveResult(BilibiliLiveParseResult result)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("Bilibili 直播解析成功");
-        sb.AppendLine($"房间：{result.RealRoomId}");
-        sb.AppendLine($"状态：{FormatLiveStatus(result.LiveStatus)}");
-        if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"标题：{TrimLine(result.Title, 120)}");
-        if (!string.IsNullOrWhiteSpace(result.AnchorName)) sb.AppendLine($"主播：{result.AnchorName}");
-        if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");
-
-        if (result.Streams.Count > 0)
-        {
-            var recommended = result.Streams.First();
-            sb.AppendLine($"推荐流：{recommended.Protocol}/{recommended.Format}/{recommended.Codec} qn={recommended.CurrentQn} CDN#{recommended.CdnIndex}");
-            sb.AppendLine(recommended.Url);
-            var summary = result.Streams
-                .GroupBy(i => $"{i.Protocol}/{i.Format}/{i.Codec}/qn={i.CurrentQn}")
-                .Take(8)
-                .Select(i => $"{i.Key}×{i.Count()}");
-            sb.AppendLine("可用流：" + string.Join("；", summary));
-        }
-        else
-        {
-            sb.AppendLine("播放流：当前未返回可用直播流。");
-        }
-
-        return sb.ToString().TrimEnd();
-    }
 
     private static string FormatLiveStatus(int status) => status switch
     {
@@ -559,7 +512,7 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
         if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"标题：{TrimLine(result.Title, 140)}");
         if (!string.IsNullOrWhiteSpace(result.PartTitle)) sb.AppendLine($"分P：P{result.Page} {TrimLine(result.PartTitle, 80)}");
         if (!string.IsNullOrWhiteSpace(result.AuthorName)) sb.AppendLine($"UP主：{result.AuthorName}");
-        if (_config.IncludeCoverUrl && !string.IsNullOrWhiteSpace(result.CoverUrl)) sb.AppendLine($"封面：{result.CoverUrl}");
+        if (config.IncludeCoverUrl && !string.IsNullOrWhiteSpace(result.CoverUrl)) sb.AppendLine($"封面：{result.CoverUrl}");
         var selected = result.SelectedVideo;
         if (selected is not null) sb.AppendLine($"清晰度：{selected.QualityName} {selected.Width}x{selected.Height} {selected.Fps:0.###}fps {selected.CodecName}");
 
@@ -569,14 +522,9 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
                 ? $"视频：下载/合并/发送未完成；原因：{TrimLine(videoSendError ?? "未知错误", 100)}"
                 : "视频：已解析，未下载发送";
         sb.AppendLine(videoStatus);
-        if (_config.UploadVideoAsFile)
+        if (config.UploadVideoAsFile)
         {
             sb.AppendLine(fileUploaded ? $"文件上传：已上传为{fileUploadInfo}" : $"文件上传：未执行或未完成；原因：{TrimLine(fileUploadInfo ?? "未知", 80)}");
-        }
-
-        if (_config.IncludeLocalFilePath && !string.IsNullOrWhiteSpace(result.LocalVideoPath))
-        {
-            sb.AppendLine($"本地文件：{result.LocalVideoPath}");
         }
 
         return sb.ToString().TrimEnd();
@@ -584,9 +532,9 @@ internal sealed partial class BilibiliMessageHandler : IDisposable
 
     private static string GetMessageScene(IncomingMessage message) => MessageHandlerCommon.GetMessageScene(message);
 
-    private static string ResolveCoverDownloadDirectory()
+    private string ResolveCoverDownloadDirectory()
     {
-        return Path.Combine(AppContext.BaseDirectory, "downloads", "MyParser", "bilibili");
+        return MyParserRuntime.BilibiliDownloadDirectory;
     }
 
     private static string SanitizeLocalFileName(string value)

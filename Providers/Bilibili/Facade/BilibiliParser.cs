@@ -207,7 +207,7 @@ internal sealed class BilibiliParser : IDisposable
 
     public async Task<BilibiliLoginStatus> CheckLoginStatusAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(_config.BilibiliCookie))
+        if (string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
             return new BilibiliLoginStatus(false, null, 0, 0, "未配置 BilibiliCookie");
         }
@@ -260,7 +260,7 @@ internal sealed class BilibiliParser : IDisposable
             throw new BilibiliParseException("扫码成功但未从响应中提取到 SESSDATA，请重试或手动填写 Cookie。");
         }
 
-        _config.BilibiliCookie = cookie;
+        MyParserRuntime.BilibiliCookie = cookie;
         var status = await CheckLoginStatusAsync(cancellationToken);
         return new BilibiliQrPollResult(code, status.Message, status.IsLogin, status.UserName);
     }
@@ -276,9 +276,9 @@ internal sealed class BilibiliParser : IDisposable
 
     private void EnsureLoginCookie()
     {
-        if (!LooksLikeBilibiliCookie(_config.BilibiliCookie))
+        if (!LooksLikeBilibiliCookie(MyParserRuntime.BilibiliCookie))
         {
-            throw new BilibiliLoginRequiredException("解析 Bilibili 视频需要登录态。请先发送 #bili-login 扫码登录，或在插件目录 bilibili_cookie.txt / 配置项 BilibiliCookie 填入 Cookie 后重启。");
+            throw new BilibiliLoginRequiredException("解析 Bilibili 视频需要登录态。请先发送 #bili-login 扫码登录，或在插件目录 cookies/bilibili.txt / 配置项 BilibiliCookie 填入 Cookie 后重启。");
         }
     }
 
@@ -318,9 +318,9 @@ internal sealed class BilibiliParser : IDisposable
         request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
         request.Headers.TryAddWithoutValidation("Referer", BilibiliConstants.Origin + "/");
         request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        if (!string.IsNullOrWhiteSpace(_config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", _config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
 
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -401,9 +401,9 @@ internal sealed class BilibiliParser : IDisposable
         request.Headers.TryAddWithoutValidation("Referer", referer);
         request.Headers.TryAddWithoutValidation("Origin", passportHeaders ? "https://passport.bilibili.com" : BilibiliConstants.Origin);
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        if (!string.IsNullOrWhiteSpace(_config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", _config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
     }
 
@@ -411,7 +411,7 @@ internal sealed class BilibiliParser : IDisposable
     {
         if (_handler is null)
         {
-            return _config.BilibiliCookie;
+            return MyParserRuntime.BilibiliCookie;
         }
 
         var domains = new[]

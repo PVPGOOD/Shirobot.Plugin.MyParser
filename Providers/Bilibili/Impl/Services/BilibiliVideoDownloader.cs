@@ -4,7 +4,6 @@ using Shirobot.Plugin.MyParser.Providers.Bilibili.Infrastructure;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Models;
 using Shirobot.Plugin.MyParser.Services;
 using ShiroBot.SDK.Abstractions;
-using ShiroBot.SDK.Core;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 
@@ -16,6 +15,15 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
     {
         var video = result.SelectedVideo ?? throw new BilibiliParseException("没有可下载的视频流。");
         var audio = result.SelectedAudio ?? throw new BilibiliParseException("没有可下载的音频流。");
+        var cacheKey = $"bilibili:{result.Bvid}:p{result.Page}:cid{result.Cid}:v{video.QualityId}:{video.CodecName}:a{audio.StreamId}";
+        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, () => DownloadAndMuxCoreAsync(result, video, audio, cancellationToken));
+        result.LocalVideoPath = downloaded.LocalPath;
+        result.LocalVideoFileUri = downloaded.FileUri;
+        return downloaded;
+    }
+
+    private async Task<(string FileUri, string LocalPath)> DownloadAndMuxCoreAsync(BilibiliParseResult result, BilibiliMediaStream video, BilibiliMediaStream audio, CancellationToken cancellationToken)
+    {
         var ffmpeg = ResolveFfmpegPath();
         if (string.IsNullOrWhiteSpace(ffmpeg))
         {
@@ -25,21 +33,26 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
         var dir = ResolveDownloadDirectory();
         Directory.CreateDirectory(dir);
         var title = SanitizeFileName(string.IsNullOrWhiteSpace(result.Title) ? result.Bvid : result.Title!, 80);
-        var part = SanitizeFileName(string.IsNullOrWhiteSpace(result.PartTitle) ? $"P{result.Page}" : result.PartTitle!, 50);
-        var workDir = Path.Combine(dir, SanitizeFileName($"{title}_P{result.Page}_{part}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}", 120));
-        Directory.CreateDirectory(workDir);
+        var unique = $"{SanitizeFileName(result.Bvid, 32)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+        var videoPath = Path.Combine(dir, $"{unique}_video.m4s");
+        var audioPath = Path.Combine(dir, $"{unique}_audio.m4s");
+        var outputPath = GetAvailableOutputPath(dir, $"{title}.mp4");
 
-        var videoPath = Path.Combine(workDir, "video.m4s");
-        var audioPath = Path.Combine(workDir, "audio.m4s");
-        var outputPath = Path.Combine(workDir, $"{title}.mp4");
-
-        BotLog.Info($"MyParser Bilibili 音视频流并发下载开始: bvid={result.Bvid}, video={Path.GetFileName(videoPath)}, audio={Path.GetFileName(audioPath)}");
-        await Task.WhenAll(
-            DownloadStreamAsync(video, videoPath, result, "视频流", cancellationToken),
-            DownloadStreamAsync(audio, audioPath, result, "音频流", cancellationToken));
-        BotLog.Info($"MyParser Bilibili 音视频流并发下载完成，开始 ffmpeg 合并: bvid={result.Bvid}");
-        await MuxAsync(ffmpeg, videoPath, audioPath, outputPath, cancellationToken);
-        await ValidateMuxedVideoAsync(outputPath, cancellationToken);
+        BotLog.Info($"MyParser Bilibili 音视频流并发下载开始: bvid={result.Bvid}, video={Path.GetFileName(videoPath)}, audio={Path.GetFileName(audioPath)}, output={Path.GetFileName(outputPath)}");
+        try
+        {
+            await Task.WhenAll(
+                DownloadStreamAsync(video, videoPath, result, "视频流", cancellationToken),
+                DownloadStreamAsync(audio, audioPath, result, "音频流", cancellationToken));
+            BotLog.Info($"MyParser Bilibili 音视频流并发下载完成，开始 ffmpeg 合并: bvid={result.Bvid}");
+            await MuxAsync(ffmpeg, videoPath, audioPath, outputPath, cancellationToken);
+            await ValidateMuxedVideoAsync(outputPath, cancellationToken);
+        }
+        finally
+        {
+            TryDelete(videoPath);
+            TryDelete(audioPath);
+        }
 
         result.LocalVideoPath = outputPath;
         result.LocalVideoFileUri = new Uri(outputPath).AbsoluteUri;
@@ -57,7 +70,7 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
         var maxBytes = config.MaxVideoDownloadMegabytes <= 0
             ? long.MaxValue
             : config.MaxVideoDownloadMegabytes * 1024L * 1024L;
-        var minParallelBytes = Math.Max(1, config.ParallelDownloadMinMegabytes) * 1024L * 1024L;
+        const long minParallelBytes = 1;
         var maxSegments = Math.Clamp(config.ParallelDownloadMaxSegments, 2, 64);
         var segmentCount = Math.Clamp(config.ParallelDownloadSegments, 2, maxSegments);
         Exception? lastError = null;
@@ -66,13 +79,13 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
         {
             try
             {
-                var downloader = new HttpRangeDownloader(http, _progressLogger);
+                var downloader = new MyParser.Services.Downloader(http, _progressLogger);
                 var request = new HttpRangeDownloadRequest(
                     url,
                     path,
                     result.Bvid,
                     maxBytes,
-                    config.EnableParallelVideoDownload,
+                    true,
                     minParallelBytes,
                     segmentCount,
                     (method, range) => CreateMediaRequest(method, url, result, range),
@@ -114,9 +127,9 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
             request.Headers.TryAddWithoutValidation("Range", range);
         }
 
-        if (!string.IsNullOrWhiteSpace(config.BilibiliCookie))
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
         {
-            request.Headers.TryAddWithoutValidation("Cookie", config.BilibiliCookie);
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
         }
 
         return request;
@@ -185,14 +198,14 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
 
     private string ResolveDownloadDirectory()
     {
-        if (string.IsNullOrWhiteSpace(config.BilibiliDownloadDirectory))
+        if (string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliDownloadDirectory))
         {
             return Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "bilibili");
         }
 
-        return Path.IsPathRooted(config.BilibiliDownloadDirectory)
-            ? config.BilibiliDownloadDirectory
-            : Path.Combine(AppContext.BaseDirectory, config.BilibiliDownloadDirectory);
+        return Path.IsPathRooted(MyParserRuntime.BilibiliDownloadDirectory)
+            ? MyParserRuntime.BilibiliDownloadDirectory
+            : Path.Combine(AppContext.BaseDirectory, MyParserRuntime.BilibiliDownloadDirectory);
     }
 
     private string? ResolveFfmpegPath()
@@ -262,6 +275,19 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
         }
 
         return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static string GetAvailableOutputPath(string directory, string fileName)
+    {
+        var path = Path.Combine(directory, fileName);
+        if (!File.Exists(path))
+        {
+            return path;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        return Path.Combine(directory, $"{name}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}{extension}");
     }
 
     private static void TryDelete(string path)

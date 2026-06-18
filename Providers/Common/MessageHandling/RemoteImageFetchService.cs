@@ -63,14 +63,9 @@ internal static class RemoteImageFetchService
 
             var bytes = output.ToArray();
             var contentType = response.Content.Headers.ContentType?.MediaType;
-            var extension = MediaUriUtilities.GuessImageExtension(contentType, imageUrl, bytes);
-            Directory.CreateDirectory(localDirectory);
-            var localPath = Path.Combine(localDirectory, $"{SanitizeLocalFileName(filePrefix)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}{extension}");
-            await File.WriteAllBytesAsync(localPath, bytes);
-
             var uri = "base64://" + Convert.ToBase64String(bytes);
-            BotLog.Info($"MyParser {platformName} 图片下载完成: source_url={imageUrl}, content_type={contentType}, bytes={total}, local_path={localPath}");
-            return (uri, localPath);
+            BotLog.Info($"MyParser {platformName} 图片下载完成: source_url={imageUrl}, content_type={contentType}, bytes={total}, mode=base64");
+            return (uri, null);
         }
         catch (Exception ex)
         {

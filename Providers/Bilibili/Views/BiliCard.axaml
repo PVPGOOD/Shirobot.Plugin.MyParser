@@ -63,7 +63,7 @@
 
     <Border Classes="PremiumCard"
             Width="360" MinHeight="150" 
-            CornerRadius="20" 
+            CornerRadius="8" 
             ClipToBounds="True" 
             Background="{DynamicResource CardFallbackBg}"
             >
@@ -84,7 +84,7 @@
 
             <!-- 顶部时长挂件 (优化: 使用半透明玻璃感并加上细边框) -->
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" 
-                    Margin="12" Padding="8,4" 
+                    Margin="12 24 12  12" Padding="8,4" 
                     Background="{DynamicResource DurationBg}" 
                     BorderBrush="{DynamicResource DurationBorder}"
                     BorderThickness="1"

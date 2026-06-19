@@ -7,9 +7,9 @@ using ShiroBot.SDK.Abstractions;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 
-internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient http)
+internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient http)
 {
-    private readonly DownloadProgressLogger _progressLogger = new(config.LogDownloadProgress, config.DownloadProgressLogIntervalSeconds, "MyParser", "bvid");
+    private readonly DownloadProgressLogger _progressLogger = new(config.LogDownloadProgress, 2, "MyParser", "bvid");
 
     public async Task<(string FileUri, string LocalPath)> DownloadAndMuxAsync(BilibiliParseResult result, CancellationToken cancellationToken = default)
     {
@@ -71,8 +71,7 @@ internal sealed class BilibiliVideoDownloader(MyParserConfig config, HttpClient 
             ? long.MaxValue
             : config.MaxVideoDownloadMegabytes * 1024L * 1024L;
         const long minParallelBytes = 1;
-        var maxSegments = Math.Clamp(config.ParallelDownloadMaxSegments, 2, 64);
-        var segmentCount = Math.Clamp(config.ParallelDownloadSegments, 2, maxSegments);
+        var segmentCount = Math.Clamp(config.ParallelDownloadThreads, 1, 64);
         Exception? lastError = null;
 
         foreach (var url in urls)

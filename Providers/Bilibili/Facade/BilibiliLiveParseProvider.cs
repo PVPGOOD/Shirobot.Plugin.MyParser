@@ -13,8 +13,9 @@ internal sealed class BilibiliLiveParseProvider(BilibiliLiveParser parser) : IPa
 
     public bool CanHandle(string text)
     {
-        return BilibiliUrlParser.ExtractLiveRoomId(text) is not null
-               || BilibiliUrlParser.ExtractB23Url(text) is not null;
+        return BilibiliUrlParser.ExtractStrictBilibiliUrl(text) is not null
+               && (BilibiliUrlParser.ExtractLiveRoomId(text) is not null
+                   || BilibiliUrlParser.ExtractB23Url(text) is not null);
     }
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)

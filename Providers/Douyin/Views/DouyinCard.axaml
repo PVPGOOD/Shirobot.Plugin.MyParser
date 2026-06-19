@@ -74,7 +74,7 @@
         </Style>
     </UserControl.Styles>
 
-    <Border CornerRadius="28" ClipToBounds="True" Background="{DynamicResource CardBackground}">
+    <Border CornerRadius="12" ClipToBounds="True" Background="{DynamicResource CardBackground}">
         <Grid>
             <!-- 保持封面原始比例完整展示，避免 UniformToFill 放大裁剪客户端封面 -->
             <Image Source="{Binding Cover}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />

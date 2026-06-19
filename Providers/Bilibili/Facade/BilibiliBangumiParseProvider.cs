@@ -14,7 +14,8 @@ internal sealed class BilibiliBangumiParseProvider(BilibiliBangumiParser parser)
 
     public bool CanHandle(string text)
     {
-        return BilibiliUrlParser.ExtractBangumiIds(text).HasAny;
+        return BilibiliUrlParser.ExtractStrictBilibiliUrl(text) is not null
+               && BilibiliUrlParser.ExtractBangumiIds(text).HasAny;
     }
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)

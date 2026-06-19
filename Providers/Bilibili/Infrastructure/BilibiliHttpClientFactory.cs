@@ -15,13 +15,13 @@ internal static class BilibiliHttpClientFactory
         };
     }
 
-    public static TimeSpan GetTimeout(MyParserConfig config)
+    public static TimeSpan GetTimeout(PluginConfig config)
     {
         var timeout = Math.Clamp(config.RequestTimeoutSeconds, 5, 120);
         return TimeSpan.FromSeconds(timeout);
     }
 
-    public static HttpClient Create(MyParserConfig config)
+    public static HttpClient Create(PluginConfig config)
     {
         return new HttpClient(CreateHandler()) { Timeout = GetTimeout(config) };
     }

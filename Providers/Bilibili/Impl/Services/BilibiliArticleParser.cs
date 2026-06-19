@@ -9,7 +9,7 @@ using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 
-internal sealed partial class BilibiliArticleParser(HttpClient http, MyParserConfig config)
+internal sealed partial class BilibiliArticleParser(HttpClient http, PluginConfig config)
 {
     public async Task<BilibiliArticleParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)
     {

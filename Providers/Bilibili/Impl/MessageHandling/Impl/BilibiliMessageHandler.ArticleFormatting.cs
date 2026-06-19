@@ -19,7 +19,6 @@ private string FormatBilibiliArticleResult(BilibiliArticleParseResult result)
         if (result.Categories.Count > 0) sb.AppendLine($"分类：{string.Join(" / ", result.Categories)}");
         if (!string.IsNullOrWhiteSpace(result.Summary)) sb.AppendLine($"摘要：{TrimLine(result.Summary, 220)}");
         else if (!string.IsNullOrWhiteSpace(result.PlainText)) sb.AppendLine($"摘要：{TrimLine(result.PlainText, 220)}");
-        if (config.IncludeCoverUrl && !string.IsNullOrWhiteSpace(result.BannerUrl)) sb.AppendLine($"封面：{result.BannerUrl}");
         sb.AppendLine($"图片数：{result.ImageUrls.Count}");
         sb.AppendLine($"数据：{FormatCount(result.ViewCount)}阅读 / {FormatCount(result.LikeCount)}赞 / {FormatCount(result.CoinCount)}投币 / {FormatCount(result.FavoriteCount)}收藏 / {FormatCount(result.ReplyCount)}评论");
         if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");

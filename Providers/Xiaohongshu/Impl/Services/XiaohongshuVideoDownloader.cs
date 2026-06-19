@@ -6,9 +6,9 @@ using ShiroBot.SDK.Abstractions;
 
 namespace Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Impl.Services;
 
-internal sealed class XiaohongshuVideoDownloader(MyParserConfig config, HttpClient http)
+internal sealed class XiaohongshuVideoDownloader(PluginConfig config, HttpClient http)
 {
-    private readonly DownloadProgressLogger _progressLogger = new(config.LogDownloadProgress, config.DownloadProgressLogIntervalSeconds, "MyParser", "note_id");
+    private readonly DownloadProgressLogger _progressLogger = new(config.LogDownloadProgress, 2, "MyParser", "note_id");
 
     public async Task<(string FileUri, string LocalPath)> DownloadVideoAsync(XiaohongshuParseResult result, CancellationToken cancellationToken = default)
     {
@@ -46,8 +46,7 @@ internal sealed class XiaohongshuVideoDownloader(MyParserConfig config, HttpClie
         var ext = string.IsNullOrWhiteSpace(format.Ext) ? "mp4" : format.Ext.Trim('.');
         var path = Path.Combine(dir, $"xhs_{SanitizeFileName(result.NoteId)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.{ext}");
         const long minParallelBytes = 1;
-        var maxSegments = Math.Clamp(config.ParallelDownloadMaxSegments, 2, 64);
-        var segmentCount = Math.Clamp(config.ParallelDownloadSegments, 2, maxSegments);
+        var segmentCount = Math.Clamp(config.ParallelDownloadThreads, 1, 64);
         var downloader = new MyParser.Services.Downloader(http, _progressLogger);
         var request = new HttpRangeDownloadRequest(
             url,

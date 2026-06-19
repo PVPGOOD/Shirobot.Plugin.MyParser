@@ -23,12 +23,12 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
     private static readonly HttpClient ImageHttp = RemoteImageFetchService.CreateImageHttpClient();
 
     private readonly IBotContext _context;
-    private readonly MyParserConfig _config;
+    private readonly PluginConfig _config;
     private readonly ParseProviderRegistry _providerRegistry;
     private readonly XiaohongshuParseProvider _provider;
     private LocalVideoHttpServer? _localVideoHttpServer;
 
-    public XiaohongshuMessageHandler(IBotContext context, MyParserConfig config, ParseProviderRegistry providerRegistry, XiaohongshuParseProvider provider)
+    public XiaohongshuMessageHandler(IBotContext context, PluginConfig config, ParseProviderRegistry providerRegistry, XiaohongshuParseProvider provider)
     {
         _context = context;
         _config = config;
@@ -44,12 +44,12 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
             var media = await _providerRegistry.ParseAsync(text);
             if (media.ProviderPayload is not XiaohongshuParseResult result)
             {
-                await TryReactToSourceMessageAsync(message, "379");
+                await TryReactToSourceMessageAsync(message, "9");
                 await ReplyAsync(message, "小红书链接已识别，但发送流程尚未接入。");
                 return;
             }
 
-            if (result.IsVideo && _config.SendVideoAsFile)
+            if (result.IsVideo && _config.SendVideoSegment)
             {
                 await SendVideoFlowAsync(message, result);
                 await TryReactToSourceMessageAsync(message, "426");
@@ -69,22 +69,22 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         }
         catch (XiaohongshuSignRequiredException ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await ReplyAsync(message, "小红书解析需要 xhshow sign 服务：" + ex.Message);
         }
         catch (XiaohongshuParseException ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await ReplyAsync(message, "小红书解析失败：" + ex.Message);
         }
         catch (TaskCanceledException)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await ReplyAsync(message, "小红书解析超时，请稍后重试。若经常失败，请检查 Cookie / sign 服务。");
         }
         catch (Exception ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             BotLog.Error($"MyParser 小红书解析异常：{ex}");
             await ReplyAsync(message, "小红书解析异常：" + ex.Message);
         }
@@ -203,15 +203,14 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         result.LocalVideoFileUri = fileUri;
         result.LocalVideoPath = localPath;
         var fileSize = new FileInfo(localPath).Length;
-        var useBase64 = _config.SendVideoSegmentAsBase64 && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, _config.VideoSegmentBase64MaxMegabytes);
         string videoUri;
         string uriMode;
-        if (useBase64)
+        if (_config.FileProtocol == VideoSegmentFileProtocol.Base64)
         {
             videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
             uriMode = "base64";
         }
-        else if (_config.UseLocalHttpServerForLargeVideoSegment)
+        else if (_config.FileProtocol == VideoSegmentFileProtocol.Http)
         {
             videoUri = GetLocalVideoHttpServer().RegisterFile(localPath);
             result.LocalVideoRegisteredToHttpServer = true;
@@ -224,7 +223,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
         }
 
         BotLog.Info($"MyParser 小红书 VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
-        var thumbUri = _config.IncludeVideoThumbUri && !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
+        var thumbUri = !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
         return new VideoOutgoingSegment(videoUri, thumbUri);
     }
 
@@ -265,12 +264,11 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private async Task SendGalleryForwardAsync(IncomingMessage message, XiaohongshuParseResult result)
     {
-        var max = Math.Clamp(_config.MaxImagesToShow, 1, 20);
         var forwarded = new List<OutgoingForwardedMessage>();
         var senderId = GetBotOrSenderId(message);
         var senderName = string.IsNullOrWhiteSpace(result.AuthorName) ? "小红书图文" : result.AuthorName!;
         forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, [new TextOutgoingSegment(BuildHeaderText(result))]));
-        var imageInputs = result.Images.Take(max).Select((image, index) => (image, Index: index + 1)).ToArray();
+        var imageInputs = result.Images.Select((image, index) => (image, Index: index + 1)).ToArray();
         var imageFiles = await MessageFetchConcurrency.SelectParallelOrderedAsync(
             imageInputs,
             MessageFetchConcurrency.DefaultImageConcurrency,
@@ -442,7 +440,7 @@ internal sealed class XiaohongshuMessageHandler : IDisposable
 
     private LocalVideoHttpServer GetLocalVideoHttpServer()
     {
-        return _localVideoHttpServer ??= new LocalVideoHttpServer(_config.LocalVideoHttpHost, _config.LocalVideoHttpPort, _config.LocalVideoHttpPublicBaseUrl, _config.AllowLanAccessToLocalVideoHttpServer);
+        return _localVideoHttpServer ??= new LocalVideoHttpServer();
     }
 
     private static string BuildHeaderText(XiaohongshuParseResult result)

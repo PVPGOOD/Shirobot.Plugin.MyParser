@@ -5,7 +5,7 @@ using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Models;
 
 namespace Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Impl.Services;
 
-internal sealed class XiaohongshuSignClient(MyParserConfig config, HttpClient http)
+internal sealed class XiaohongshuSignClient(PluginConfig config, HttpClient http)
 {
     public async Task<IReadOnlyDictionary<string, string>> SignAsync(
         string method,

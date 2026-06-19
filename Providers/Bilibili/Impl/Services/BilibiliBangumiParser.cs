@@ -7,7 +7,7 @@ using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 
-internal sealed class BilibiliBangumiParser(HttpClient http, MyParserConfig config)
+internal sealed class BilibiliBangumiParser(HttpClient http, PluginConfig config)
 {
     private const string PgcSeasonApi = "https://api.bilibili.com/pgc/view/web/season";
     private const string PgcMediaApi = "https://api.bilibili.com/pgc/view/web/media";
@@ -295,9 +295,20 @@ internal sealed class BilibiliBangumiParser(HttpClient http, MyParserConfig conf
 
     private long GetVideoScore(BilibiliMediaStream stream)
     {
-        var codecScore = config.PreferH265 ? (stream.CodecId == 12 ? 1_000_000L : 0L) : (stream.CodecId == 7 ? 1_000_000L : 0L);
+        var codecScore = stream.CodecId == GetPreferredCodecId() ? 1_000_000L : 0L;
         var fpsScore = config.PreferHighFps ? (long)(stream.Fps * 1_000) : 0;
         return stream.QualityId * 10_000_000L + codecScore + stream.Width * stream.Height + fpsScore + stream.Bandwidth / 1_000;
+    }
+
+    private int GetPreferredCodecId()
+    {
+        return config.PreferredVideoCodec switch
+        {
+            PreferredVideoCodec.H264 => 7,
+            PreferredVideoCodec.H265 => 12,
+            PreferredVideoCodec.AV1 => 13,
+            _ => 12
+        };
     }
 
     private static double ParseFps(string? value)

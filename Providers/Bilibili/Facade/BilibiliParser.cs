@@ -38,7 +38,7 @@ internal sealed class BilibiliParser : IDisposable
     private readonly HttpClient _http;
     private readonly HttpClientHandler? _handler;
     private readonly bool _ownsHttpClient;
-    private readonly MyParserConfig _config;
+    private readonly PluginConfig _config;
     private readonly BilibiliVideoDownloader _videoDownloader;
     private readonly BilibiliArticleParser _articleParser;
 
@@ -46,7 +46,7 @@ internal sealed class BilibiliParser : IDisposable
     private string? _mixinKey;
     private DateTimeOffset _mixinKeyExpiresAt;
 
-    public BilibiliParser(MyParserConfig config, HttpClient? httpClient = null)
+    public BilibiliParser(PluginConfig config, HttpClient? httpClient = null)
     {
         _config = config;
         _ownsHttpClient = httpClient is null;
@@ -290,8 +290,15 @@ internal sealed class BilibiliParser : IDisposable
             return bvid;
         }
 
+        var aid = BilibiliUrlParser.ExtractAid(text);
+        if (aid is not null)
+        {
+            var view = await GetViewByAidAsync(aid.Value, cancellationToken);
+            return view.GetStringOrDefault("bvid") ?? throw new BilibiliParseException("B站 view 接口未返回 bvid。");
+        }
+
         var shortUrl = BilibiliUrlParser.ExtractB23Url(text)
-                       ?? throw new BilibiliParseException("无法从输入中提取 BV 号或 b23.tv 短链接。");
+                       ?? throw new BilibiliParseException("无法从输入中提取 BV/AV 号或 b23.tv 短链接。");
         var finalUrl = await ResolveBilibiliRedirectUrlAsync(shortUrl, cancellationToken);
         bvid = BilibiliUrlParser.ExtractBvid(finalUrl);
         if (bvid is not null)
@@ -335,6 +342,12 @@ internal sealed class BilibiliParser : IDisposable
     private async Task<JsonElement> GetViewAsync(string bvid, CancellationToken cancellationToken)
     {
         using var json = await GetJsonDocumentAsync(BilibiliConstants.ViewApi, new Dictionary<string, string> { ["bvid"] = bvid }, BilibiliConstants.Origin + "/", cancellationToken);
+        return json.RootElement.GetPropertyOrDefault("data")?.Clone() ?? throw new BilibiliParseException("B站 view 接口未返回 data。");
+    }
+
+    private async Task<JsonElement> GetViewByAidAsync(long aid, CancellationToken cancellationToken)
+    {
+        using var json = await GetJsonDocumentAsync(BilibiliConstants.ViewApi, new Dictionary<string, string> { ["aid"] = aid.ToString() }, BilibiliConstants.Origin + "/", cancellationToken);
         return json.RootElement.GetPropertyOrDefault("data")?.Clone() ?? throw new BilibiliParseException("B站 view 接口未返回 data。");
     }
 
@@ -508,9 +521,20 @@ internal sealed class BilibiliParser : IDisposable
 
     private long GetVideoScore(BilibiliMediaStream stream)
     {
-        var codecScore = _config.PreferH265 ? (stream.CodecId == 12 ? 1_000_000L : 0L) : (stream.CodecId == 7 ? 1_000_000L : 0L);
+        var codecScore = stream.CodecId == GetPreferredCodecId() ? 1_000_000L : 0L;
         var fpsScore = _config.PreferHighFps ? (long)(stream.Fps * 1_000) : 0;
         return stream.QualityId * 10_000_000L + codecScore + stream.Width * stream.Height + fpsScore + stream.Bandwidth / 1_000;
+    }
+
+    private int GetPreferredCodecId()
+    {
+        return _config.PreferredVideoCodec switch
+        {
+            PreferredVideoCodec.H264 => 7,
+            PreferredVideoCodec.H265 => 12,
+            PreferredVideoCodec.AV1 => 13,
+            _ => 12
+        };
     }
 
     private static double ParseFps(string? value)

@@ -4,7 +4,7 @@ namespace Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Infrastructure;
 
 internal static class XiaohongshuHttpClientFactory
 {
-    public static HttpClient Create(MyParserConfig config)
+    public static HttpClient Create(PluginConfig config)
     {
         var handler = new HttpClientHandler
         {

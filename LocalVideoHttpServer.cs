@@ -17,27 +17,20 @@ internal sealed class LocalVideoHttpServer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loopTask;
     private readonly string _publicBaseUrl;
-    private readonly bool _allowLanClients;
 
-    private int Port { get; }
+    private const string Host = "127.0.0.1";
+    private const int Port = 1231;
+    private const string PublicBaseUrl = "http://127.0.0.1:1231/myparser";
 
-    public LocalVideoHttpServer(string host, int port, string? publicBaseUrl, bool allowLanClients = false)
+    public LocalVideoHttpServer()
     {
-        host = string.IsNullOrWhiteSpace(host) ? "127.0.0.1" : host.Trim();
-        var address = ResolveListenAddress(host);
-        Port = port > 0 ? port : GetFreeTcpPort(address);
-
-        _listener = new TcpListener(address, Port);
+        _listener = new TcpListener(IPAddress.Loopback, Port);
         _listener.Start();
 
-        var publicHost = address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any) ? "127.0.0.1" : host;
-        _publicBaseUrl = string.IsNullOrWhiteSpace(publicBaseUrl)
-            ? $"http://{publicHost}:{Port}/myparser"
-            : publicBaseUrl.Trim().TrimEnd('/');
-        _allowLanClients = allowLanClients;
+        _publicBaseUrl = PublicBaseUrl;
 
         _loopTask = Task.Run(ListenLoopAsync);
-        BotLog.Info($"MyParser 本地视频 HTTP 服务已启动: listen=http://{host}:{Port}/myparser/ via TcpListener, public_base={_publicBaseUrl}");
+        BotLog.Info($"MyParser 本地视频 HTTP 服务已启动: listen=http://{Host}:{Port}/myparser/ via TcpListener, public_base={_publicBaseUrl}, allow_remote=false");
     }
 
     public string RegisterFile(string path)
@@ -247,31 +240,6 @@ internal sealed class LocalVideoHttpServer : IDisposable
             return true;
         }
 
-        return _allowLanClients && IsPrivateLanAddress(ip.Address);
-    }
-
-    private static bool IsPrivateLanAddress(IPAddress address)
-    {
-        if (address.IsIPv4MappedToIPv6)
-        {
-            address = address.MapToIPv4();
-        }
-
-        if (address.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var bytes = address.GetAddressBytes();
-            return bytes[0] == 10
-                   || bytes[0] == 127
-                   || bytes[0] == 192 && bytes[1] == 168
-                   || bytes[0] == 172 && bytes[1] is >= 16 and <= 31
-                   || bytes[0] == 169 && bytes[1] == 254;
-        }
-
-        if (address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            return address.IsIPv6LinkLocal || address.IsIPv6SiteLocal;
-        }
-
         return false;
     }
 
@@ -414,27 +382,6 @@ internal sealed class LocalVideoHttpServer : IDisposable
 
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             remaining -= read;
-        }
-    }
-
-    private static IPAddress ResolveListenAddress(string host)
-    {
-        return host is "0.0.0.0" or "*" or "+"
-            ? IPAddress.Any
-            : IPAddress.TryParse(host, out var parsed) ? parsed : IPAddress.Loopback;
-    }
-
-    private static int GetFreeTcpPort(IPAddress address)
-    {
-        var listener = new TcpListener(address, 0);
-        listener.Start();
-        try
-        {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
         }
     }
 

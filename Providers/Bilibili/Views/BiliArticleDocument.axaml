@@ -9,61 +9,133 @@
         <vm:BiliArticleDocumentViewModel />
     </Design.DataContext>
 
-    <Border Width="720" Height="{Binding CanvasHeight}" Background="#0F1115">
-        <StackPanel Margin="48,44,48,44" Spacing="24">
-            <Grid ColumnDefinitions="56,*,Auto" Height="60">
-                <Border Grid.Column="0" Width="46" Height="46" CornerRadius="23" ClipToBounds="True" Background="#2B2930" BorderBrush="#FB7299" BorderThickness="2" VerticalAlignment="Center">
-                    <Image Source="{Binding Avatar}" Stretch="UniformToFill" />
-                </Border>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
-                    <TextBlock Text="{Binding AuthorName}" Foreground="#F4EFF4" FontSize="18" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding MetaText}" Foreground="#CAC4D0" FontSize="12" />
-                </StackPanel>
-                <Border Grid.Column="2" VerticalAlignment="Center" CornerRadius="999" Background="#29FB7299" Padding="12,6">
-                    <TextBlock Text="{Binding KindText}" Foreground="#FFD8E7" FontSize="12" FontWeight="SemiBold" />
-                </Border>
-            </Grid>
+    <UserControl.Styles>
+        <Style Selector="Border.PremiumCard">
+            <Setter Property="BoxShadow" Value="0 8 24 0 #1A000000"/>
+        </Style>
+    </UserControl.Styles>
 
-            <TextBlock Text="{Binding Title}" Foreground="#FFFFFF" FontSize="26" FontWeight="Bold" TextWrapping="Wrap" LineHeight="34" />
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="CardFallbackBg">#F5F5F5</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextPrimary">#1A1A1A</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextSecondary">#3F3F3F</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextMuted">#656565</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBg">#CCFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBorder">#33FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagBg">#1A000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagText">#4A4A4A</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardImageOverlay">#4DFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBg">#59000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationText">#FFFFFF</SolidColorBrush>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="CardFallbackBg">#121212</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextPrimary">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextSecondary">#ECECEC</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextMuted">#CCCCCC</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBg">#33000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagBg">#2BFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagText">#E5E5E5</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardImageOverlay">#66000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBg">#4D000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationText">#EAEAEA</SolidColorBrush>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <SolidColorBrush x:Key="YellowVBorder">#111111</SolidColorBrush>
+        </ResourceDictionary>
+    </UserControl.Resources>
 
-            <Border CornerRadius="18" Background="#1D1B20" BorderBrush="#30CAC4D0" BorderThickness="1" Padding="14,10">
-                <TextBlock Text="{Binding StatsText}" Foreground="#E6E0E9" FontSize="13" TextWrapping="Wrap" />
-            </Border>
+    <Border Classes="PremiumCard"
+            Width="720"
+            Height="{Binding CanvasHeight}"
+            CornerRadius="8"
+            ClipToBounds="True"
+            Background="{DynamicResource CardFallbackBg}">
+        <Grid>
+            <Border Background="{DynamicResource CardImageOverlay}" />
 
-            <ItemsControl ItemsSource="{Binding Blocks}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:BiliArticleDocumentBlockViewModel">
-                        <StackPanel Spacing="8" Margin="0,0,0,10">
-                            <Border IsVisible="{Binding IsImage}" CornerRadius="16" ClipToBounds="True" Background="#1D1B20" BorderBrush="#22FFFFFF" BorderThickness="1" Height="{Binding Height}">
-                                <Image Source="{Binding Image}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <StackPanel Margin="48,44,48,44" Spacing="22">
+                <Border Background="{DynamicResource CardPanelBg}" BorderBrush="{DynamicResource CardPanelBorder}" BorderThickness="1" CornerRadius="12" Padding="16,14">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Grid Width="46" Height="46" Margin="0,0,14,0">
+                            <Border CornerRadius="23" ClipToBounds="True" BorderBrush="#FB7299" BorderThickness="1.5">
+                                <Image Source="{Binding Avatar}" Stretch="UniformToFill" />
                             </Border>
-                            <TextBlock IsVisible="{Binding IsImage}" Text="{Binding Caption}" Foreground="#938F99" FontSize="11" HorizontalAlignment="Center" />
+                            <Border Background="#FFB020" Width="16" Height="16" CornerRadius="8"
+                                    BorderBrush="{StaticResource YellowVBorder}" BorderThickness="1"
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2">
+                                <TextBlock Text="⚡" FontSize="9" Foreground="White" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" />
+                            </Border>
+                        </Grid>
 
-                            <Grid IsVisible="{Binding IsText}" Margin="{Binding Margin}" ColumnDefinitions="Auto,*">
-                                <Border Grid.Column="0"
-                                        IsVisible="{Binding HasAccent}"
-                                        Width="{Binding AccentWidth}"
-                                        CornerRadius="999"
-                                        Background="{Binding AccentBrush}"
-                                        Margin="0,4,10,4" />
-                                <Border Grid.Column="1"
-                                        CornerRadius="10"
-                                        Background="{Binding Background}"
-                                        BorderBrush="{Binding BorderBrush}"
-                                        BorderThickness="1"
-                                        Padding="10,8">
-                                    <TextBlock Text="{Binding Text}"
-                                               Foreground="{Binding Foreground}"
-                                               FontSize="{Binding FontSize}"
-                                               FontWeight="{Binding FontWeight}"
-                                               TextWrapping="Wrap"
-                                               LineHeight="{Binding LineHeight}" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding AuthorName}" Foreground="{DynamicResource CardTextPrimary}" FontSize="18" FontWeight="Bold" />
+                                <Border Background="#FB7299" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                    <TextBlock Text="UP" Foreground="White" FontSize="10" FontWeight="Black" Margin="0,-1,0,0" />
                                 </Border>
-                            </Grid>
+                            </StackPanel>
+                            <TextBlock Text="{Binding MetaText}" Foreground="{DynamicResource CardTextMuted}" FontSize="12" FontWeight="Medium" />
                         </StackPanel>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </StackPanel>
+
+                        <Border Grid.Column="2" VerticalAlignment="Center" Padding="10,5"
+                                Background="{DynamicResource DurationBg}"
+                                BorderBrush="{DynamicResource DurationBorder}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <TextBlock Text="{Binding KindText}" Foreground="{DynamicResource DurationText}" FontSize="12" FontWeight="Medium" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource CardTextPrimary}" FontSize="26" FontWeight="Heavy" TextWrapping="Wrap" LineHeight="34" />
+
+                <Border Background="{DynamicResource CardPanelBg}" BorderBrush="{DynamicResource CardPanelBorder}" BorderThickness="1" CornerRadius="12" Padding="14,10">
+                    <TextBlock Text="{Binding StatsText}" Foreground="{DynamicResource CardTextSecondary}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                </Border>
+
+                <ItemsControl ItemsSource="{Binding Blocks}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:BiliArticleDocumentBlockViewModel">
+                            <StackPanel Spacing="8" Margin="0,0,0,10">
+                                <Border IsVisible="{Binding IsImage}" CornerRadius="12" ClipToBounds="True" Background="{DynamicResource CardPanelBg}" BorderBrush="{DynamicResource CardPanelBorder}" BorderThickness="1" Height="{Binding Height}">
+                                    <Image Source="{Binding Image}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock IsVisible="{Binding IsImage}" Text="{Binding Caption}" Foreground="{DynamicResource CardTextMuted}" FontSize="11" HorizontalAlignment="Center" />
+
+                                <Grid IsVisible="{Binding IsText}" Margin="{Binding Margin}" ColumnDefinitions="Auto,*">
+                                    <Border Grid.Column="0"
+                                            IsVisible="{Binding HasAccent}"
+                                            Width="{Binding AccentWidth}"
+                                            CornerRadius="999"
+                                            Background="{Binding AccentBrush}"
+                                            Margin="0,4,10,4" />
+                                    <Border Grid.Column="1"
+                                            CornerRadius="10"
+                                            Background="{Binding Background}"
+                                            BorderBrush="{Binding BorderBrush}"
+                                            BorderThickness="1"
+                                            Padding="10,8">
+                                        <TextBlock Text="{Binding Text}"
+                                                   Foreground="{Binding Foreground}"
+                                                   FontSize="{Binding FontSize}"
+                                                   FontWeight="{Binding FontWeight}"
+                                                   TextWrapping="Wrap"
+                                                   LineHeight="{Binding LineHeight}" />
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Grid>
     </Border>
 </UserControl>

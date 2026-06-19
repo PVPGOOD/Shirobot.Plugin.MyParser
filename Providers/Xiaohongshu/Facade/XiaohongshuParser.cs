@@ -16,11 +16,11 @@ internal sealed partial class XiaohongshuParser : IDisposable
 {
     private readonly HttpClient _http;
     private readonly bool _ownsHttpClient;
-    private readonly MyParserConfig _config;
+    private readonly PluginConfig _config;
     private readonly XiaohongshuSignClient _signClient;
     private readonly XiaohongshuVideoDownloader _videoDownloader;
 
-    public XiaohongshuParser(MyParserConfig config, HttpClient? httpClient = null)
+    public XiaohongshuParser(PluginConfig config, HttpClient? httpClient = null)
     {
         _config = config;
         _ownsHttpClient = httpClient is null;

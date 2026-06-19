@@ -7,9 +7,9 @@ using static Shirobot.Plugin.MyParser.Providers.Douyin.Infrastructure.DouyinRequ
 
 namespace Shirobot.Plugin.MyParser.Providers.Douyin.Impl.Services;
 
-internal sealed class DouyinVideoDownloader(MyParserConfig config, HttpClient http)
+internal sealed class DouyinVideoDownloader(PluginConfig config, HttpClient http)
 {
-    private readonly DownloadProgressLogger _progressLogger = new(config.LogDownloadProgress, config.DownloadProgressLogIntervalSeconds, "MyParser", "aweme_id");
+    private readonly DownloadProgressLogger _progressLogger = new(config.LogDownloadProgress, 2, "MyParser", "aweme_id");
 
     public async Task<(string FileUri, string LocalPath)> DownloadVideoAsync(DouyinParseResult result, CancellationToken cancellationToken = default)
     {
@@ -54,8 +54,7 @@ internal sealed class DouyinVideoDownloader(MyParserConfig config, HttpClient ht
         var path = Path.Combine(dir, $"douyin_{SanitizeFileName(result.AwemeId)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.mp4");
 
         const long minParallelBytes = 1;
-        var maxSegments = Math.Clamp(config.ParallelDownloadMaxSegments, 2, 64);
-        var segmentCount = Math.Clamp(config.ParallelDownloadSegments, 2, maxSegments);
+        var segmentCount = Math.Clamp(config.ParallelDownloadThreads, 1, 64);
         var downloader = new MyParser.Services.Downloader(http, _progressLogger);
         var request = new HttpRangeDownloadRequest(
             url,

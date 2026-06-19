@@ -2,7 +2,7 @@ namespace Shirobot.Plugin.MyParser.Utility;
 
 internal static class LocalMediaCleanup
 {
-    public static void DeleteLocalVideoIfConfigured(MyParserConfig config, string? localPath, string provider)
+    public static void DeleteLocalVideoIfConfigured(PluginConfig config, string? localPath, string provider)
     {
         if (!config.DeleteLocalVideoAfterSend || string.IsNullOrWhiteSpace(localPath))
         {
@@ -22,21 +22,26 @@ internal static class LocalMediaCleanup
             return;
         }
 
+        var cancellationToken = MyParserRuntime.BackgroundCancellationToken;
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
                 DeleteLocalVideoNow(config, localPath, provider);
+            }
+            catch (OperationCanceledException)
+            {
+                // Plugin unload cancels pending delayed cleanup so the assembly can be released.
             }
             catch
             {
                 // Cleanup is best-effort and must never affect message sending.
             }
-        });
+        }, cancellationToken);
     }
 
-    private static void DeleteLocalVideoNow(MyParserConfig config, string localPath, string provider)
+    private static void DeleteLocalVideoNow(PluginConfig config, string localPath, string provider)
     {
         try
         {
@@ -53,6 +58,18 @@ internal static class LocalMediaCleanup
                 var dir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrWhiteSpace(dir) && IsUnderAllowedMediaRoot(config, dir))
                 {
+                    if (IsBilibiliLiveClipDirectory(dir))
+                    {
+                        TryDeleteDirectoryRecursive(dir);
+                        var parentDir = Path.GetDirectoryName(dir);
+                        if (!string.IsNullOrWhiteSpace(parentDir))
+                        {
+                            TryDeleteDirectoryIfEmpty(parentDir);
+                        }
+
+                        return;
+                    }
+
                     TryDeleteFile(Path.Combine(dir, "video.m4s"));
                     TryDeleteFile(Path.Combine(dir, "audio.m4s"));
                     TryDeleteDirectoryIfEmpty(dir);
@@ -65,7 +82,7 @@ internal static class LocalMediaCleanup
         }
     }
 
-    private static bool IsUnderAllowedMediaRoot(MyParserConfig config, string path)
+    private static bool IsUnderAllowedMediaRoot(PluginConfig config, string path)
     {
         var roots = new[]
         {
@@ -81,6 +98,12 @@ internal static class LocalMediaCleanup
             .Where(i => !string.IsNullOrWhiteSpace(i))
             .Select(i => Path.GetFullPath(i).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar)
             .Any(root => normalizedPath.StartsWith(root, comparison));
+    }
+
+    private static bool IsBilibiliLiveClipDirectory(string path)
+    {
+        var dir = new DirectoryInfo(path);
+        return string.Equals(dir.Parent?.Name, "live-clips", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveRoot(string? configured, string fallback)
@@ -102,6 +125,14 @@ internal static class LocalMediaCleanup
         if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
         {
             Directory.Delete(path, false);
+        }
+    }
+
+    private static void TryDeleteDirectoryRecursive(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, true);
         }
     }
 }

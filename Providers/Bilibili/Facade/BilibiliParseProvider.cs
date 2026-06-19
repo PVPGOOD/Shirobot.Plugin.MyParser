@@ -15,12 +15,14 @@ internal sealed class BilibiliParseProvider(BilibiliParser parser) : IIncomingMe
     public bool CanHandle(string text)
     {
         return BilibiliUrlParser.ExtractBvid(text) is not null
+               || BilibiliUrlParser.ExtractAid(text) is not null
                || BilibiliUrlParser.ExtractB23Url(text) is not null;
     }
 
     public string? ExtractParseText(IncomingMessage message)
     {
-        return BilibiliLightAppUrlExtractor.ExtractParseText(message);
+        var text = BilibiliLightAppUrlExtractor.ExtractParseText(message);
+        return BilibiliUrlParser.ExtractStrictBilibiliUrl(text ?? string.Empty);
     }
 
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)

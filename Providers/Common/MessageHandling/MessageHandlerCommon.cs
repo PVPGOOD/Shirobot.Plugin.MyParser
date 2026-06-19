@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Shirobot.Plugin.MyParser.Utility;
+using System.Collections.Concurrent;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Core;
@@ -9,6 +9,8 @@ namespace Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
 
 internal static class MessageHandlerCommon
 {
+    private static readonly ConcurrentDictionary<string, byte> SentReactions = new(StringComparer.Ordinal);
+
     public static async Task ReactAsync(IBotContext context, IncomingMessage message, string faceId, string platformName)
     {
         if (message is not GroupIncomingMessage group)
@@ -16,17 +18,79 @@ internal static class MessageHandlerCommon
             return;
         }
 
+        var key = $"{group.Group.GroupId}:{group.MessageSeq}:{faceId}";
+        if (!SentReactions.TryAdd(key, 0))
+        {
+            return;
+        }
+
         try
         {
             await context.Group.SendGroupMessageReactionAsync(group.Group.GroupId, group.MessageSeq, faceId);
+            if (!string.Equals(faceId, "351", StringComparison.OrdinalIgnoreCase))
+            {
+                await RemoveReactionAsync(context, group, "351", platformName);
+            }
         }
         catch (Exception ex)
         {
+            SentReactions.TryRemove(key, out _);
+            if (IsAlreadyReactedError(ex))
+            {
+                BotLog.Info($"MyParser {platformName} 消息表情已存在，跳过重复贴表情: group_id={group.Group.GroupId}, message_seq={group.MessageSeq}, face={faceId}");
+                return;
+            }
+
             BotLog.Warning($"MyParser {platformName} 消息贴表情失败: group_id={group.Group.GroupId}, message_seq={group.MessageSeq}, face={faceId}, error={ex.Message}");
         }
     }
 
-    public static Task<SendMessageResult> ReplyTextAsync(IBotContext context, MyParserConfig config, IncomingMessage message, string text)
+    public static Task RemoveReactionAsync(IBotContext context, IncomingMessage message, string faceId, string platformName)
+    {
+        return message is GroupIncomingMessage group
+            ? RemoveReactionAsync(context, group, faceId, platformName)
+            : Task.CompletedTask;
+    }
+
+    private static async Task RemoveReactionAsync(IBotContext context, GroupIncomingMessage group, string faceId, string platformName)
+    {
+        var key = $"{group.Group.GroupId}:{group.MessageSeq}:{faceId}";
+        if (!SentReactions.ContainsKey(key))
+        {
+            return;
+        }
+
+        try
+        {
+            await context.Group.SendGroupMessageReactionAsync(group.Group.GroupId, group.MessageSeq, faceId, isAdd: false);
+            SentReactions.TryRemove(key, out _);
+        }
+        catch (Exception ex)
+        {
+            BotLog.Warning($"MyParser {platformName} 消息取消表情失败: group_id={group.Group.GroupId}, message_seq={group.MessageSeq}, face={faceId}, error={ex.Message}");
+        }
+    }
+
+    public static void ClearReactionCache()
+    {
+        SentReactions.Clear();
+    }
+
+    private static bool IsAlreadyReactedError(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("已经设置过", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("already", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static Task<SendMessageResult> ReplyTextAsync(IBotContext context, PluginConfig config, IncomingMessage message, string text)
     {
         return config.QuoteReply ? context.Message.QuoteReplyAsync(message, text) : context.Message.ReplyAsync(message, text);
     }
@@ -69,7 +133,7 @@ internal static class MessageHandlerCommon
 
     public static async Task<string> UploadLocalVideoFileAsync(
         IBotContext context,
-        MyParserConfig config,
+        PluginConfig config,
         IncomingMessage message,
         string? localVideoPath,
         string platformName,
@@ -82,13 +146,12 @@ internal static class MessageHandlerCommon
 
         var localPath = Path.GetFullPath(localVideoPath);
         var fileSize = new FileInfo(localPath).Length;
-        var useBase64 = config.UploadVideoAsBase64 && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, config.UploadVideoBase64MaxMegabytes);
-        var fileUri = useBase64 ? "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath)) : new Uri(localPath).AbsoluteUri;
+        var fileUri = new Uri(localPath).AbsoluteUri;
         var fileName = Path.GetFileName(localPath);
-        var uploadMode = useBase64 ? "base64" : "file";
+        const string uploadMode = "file";
         var stopwatch = Stopwatch.StartNew();
 
-        BotLog.Info($"MyParser {platformName} 文件上传开始: media_id={mediaId}, mode={uploadMode}, file_mb={fileSize / 1024d / 1024d:F2}, base64_limit_mb={config.UploadVideoBase64MaxMegabytes}, file={localPath}");
+        BotLog.Info($"MyParser {platformName} 文件上传开始: media_id={mediaId}, mode={uploadMode}, file_mb={fileSize / 1024d / 1024d:F2}, file={localPath}");
 
         switch (message)
         {

@@ -163,8 +163,9 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
                 break;
         }
 
-        var prompt = await SendReplyAsync(message, $"如需解析指定分P，请用数字回复此消息。例：回复 \"4\" 即解析 P4。也可以直接发送：https://www.bilibili.com/video/{result.Bvid}/?p=4");
+        var prompt = await SendReplyAsync(message, "已默认解析 P1；如需解析其它分P，请在10min内用数字回复此消息。");
         SubscribeBilibiliPageReply(result, prompt.MessageSeq);
+        await ParseAndReplyAsync(message, $"https://www.bilibili.com/video/{result.Bvid}/?p=1");
     }
 
     private static string BuildMultiPageHeaderText(BilibiliMultiPageParseResult result)
@@ -176,7 +177,6 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"标题：{TrimLine(result.Title, 120)}");
         if (!string.IsNullOrWhiteSpace(result.AuthorName)) sb.AppendLine($"UP：{result.AuthorName}");
         if (result.RequestedPage > 1) sb.AppendLine($"当前链接指定：P{result.RequestedPage}");
-        if (!string.IsNullOrWhiteSpace(result.CoverUrl)) sb.AppendLine($"主封面：{result.CoverUrl}");
         if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");
         return sb.ToString().TrimEnd();
     }
@@ -186,7 +186,6 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         var sb = new StringBuilder();
         sb.AppendLine($"P{page.Page}: {TrimLine(string.IsNullOrWhiteSpace(page.PartTitle) ? "未命名" : page.PartTitle!, 80)}");
         if (page.DurationSeconds > 0) sb.AppendLine($"时长：{FormatDurationText(page.DurationSeconds)}");
-        if (!string.IsNullOrWhiteSpace(page.CoverUrl)) sb.AppendLine($"封面：{page.CoverUrl}");
         sb.AppendLine($"链接：{page.SourceUrl}");
         return sb.ToString().TrimEnd();
     }

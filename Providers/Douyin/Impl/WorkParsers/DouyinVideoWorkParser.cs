@@ -5,7 +5,7 @@ using static Shirobot.Plugin.MyParser.Providers.Douyin.Utilities.DouyinParseHelp
 
 namespace Shirobot.Plugin.MyParser.Providers.Douyin.Impl.WorkParsers;
 
-internal sealed class DouyinVideoWorkParser(MyParserConfig config) : IDouyinWorkParser
+internal sealed class DouyinVideoWorkParser(PluginConfig config) : IDouyinWorkParser
 {
     public bool CanParse(JsonElement aweme)
     {
@@ -180,8 +180,19 @@ internal sealed class DouyinVideoWorkParser(MyParserConfig config) : IDouyinWork
         var height = Math.Min(quality.Width, quality.Height);
         var pixels = width > 0 && height > 0 ? width * height : RatioRank(quality.Ratio) * 400_000;
         var fps = quality.Fps > 0 ? quality.Fps : 30;
-        var codecBonus = config.PreferH265 && quality.IsByteVc1 ? 500_000_000L : 0;
+        var codecBonus = IsPreferredCodec(quality) ? 500_000_000L : 0;
         var fpsScore = config.PreferHighFps ? fps * 10_000_000L : 0;
         return pixels * 1000L + fpsScore + quality.BitRate + codecBonus;
+    }
+
+    private bool IsPreferredCodec(DouyinVideoQuality quality)
+    {
+        return config.PreferredVideoCodec switch
+        {
+            PreferredVideoCodec.H264 => string.Equals(quality.Codec, "h264", StringComparison.OrdinalIgnoreCase),
+            PreferredVideoCodec.H265 => quality.IsByteVc1 || string.Equals(quality.Codec, "h265", StringComparison.OrdinalIgnoreCase),
+            PreferredVideoCodec.AV1 => string.Equals(quality.Codec, "av1", StringComparison.OrdinalIgnoreCase),
+            _ => quality.IsByteVc1
+        };
     }
 }

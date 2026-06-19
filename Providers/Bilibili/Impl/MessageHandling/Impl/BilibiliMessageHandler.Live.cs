@@ -18,41 +18,45 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
             return;
         }
 
+        var shouldCleanup = false;
         try
         {
-            var clipSeconds = Math.Clamp(config.BilibiliLiveReplayClipSeconds, 1, 30);
+            var clipSeconds = Math.Clamp(config.BilibiliLiveReplayClipSeconds, 3, 3000);
             await ReplyAsync(message, $"正在从当前直播流可回溯分片中截取最近约 {clipSeconds} 秒，请稍候…");
             var downloader = new BilibiliLiveClipDownloader(config);
-            var clip = await downloader.DownloadRecentClipAsync(result, progress => ReplyAsync(message,
-                $"直播回溯分片已冻结：当前 m3u8 提供 {progress.SelectedSegments}/{progress.TotalSegments} 段，约 {progress.ActualSeconds:F0} 秒；正在用 ffmpeg 封装 MP4…"));
-            await ReplyAsync(message, "直播回看片段已封装完成，正在发送到 QQ…");
+            var clip = await downloader.DownloadRecentClipAsync(result, _ => Task.CompletedTask);
             result.LocalClipPath = clip.LocalPath;
             result.LocalClipFileUri = clip.FileUri;
+            shouldCleanup = true;
             var videoUri = BuildLocalVideoSegmentUri(clip.LocalPath, result);
             var segment = new VideoOutgoingSegment(videoUri, string.IsNullOrWhiteSpace(result.CoverUrl) ? null : result.CoverUrl);
             await SendLiveClipVideoMessageAsync(message, result, segment, clip.Stream);
-            CleanupLocalLiveClipAfterSend(result);
         }
         catch (Exception ex)
         {
             BotLog.Warning($"MyParser Bilibili 直播片段发送未完成: room_id={result.RealRoomId}, detail={ex.Message}");
             await ReplyAsync(message, "直播回看片段截取/发送未完成：" + ex.Message);
         }
+        finally
+        {
+            if (shouldCleanup)
+            {
+                CleanupLocalLiveClipAfterSend(result);
+            }
+        }
     }
 
     private string BuildLocalVideoSegmentUri(string localPath, BilibiliLiveParseResult result)
     {
         var fileSize = new FileInfo(localPath).Length;
-        var useBase64 = config.SendVideoSegmentAsBase64
-                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, config.VideoSegmentBase64MaxMegabytes);
         string videoUri;
         string uriMode;
-        if (useBase64)
+        if (config.FileProtocol == VideoSegmentFileProtocol.Base64)
         {
             videoUri = "base64://" + Convert.ToBase64String(File.ReadAllBytes(localPath));
             uriMode = "base64";
         }
-        else if (config.UseLocalHttpServerForLargeVideoSegment)
+        else if (config.FileProtocol == VideoSegmentFileProtocol.Http)
         {
             videoUri = GetLocalVideoHttpServer().RegisterFile(localPath);
             result.LocalClipRegisteredToHttpServer = true;
@@ -98,13 +102,42 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
 
     private void CleanupLocalLiveClipAfterSend(BilibiliLiveParseResult result)
     {
-        if (result.LocalClipRegisteredToHttpServer && config.DeleteLocalVideoDelaySeconds <= 0)
+        if (result.LocalClipRegisteredToHttpServer)
         {
             _localVideoHttpServer?.UnregisterFile(result.LocalClipPath);
             result.LocalClipRegisteredToHttpServer = false;
         }
 
-        LocalMediaCleanup.DeleteLocalVideoIfConfigured(config, result.LocalClipPath, "bilibili");
+        DeleteLocalLiveClipNow(result.LocalClipPath);
+    }
+
+    private static void DeleteLocalLiveClipNow(string? localPath)
+    {
+        if (string.IsNullOrWhiteSpace(localPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(localPath);
+            if (File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+            }
+
+            var dir = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(dir)
+                && string.Equals(new DirectoryInfo(dir).Parent?.Name, "live-clips", StringComparison.OrdinalIgnoreCase)
+                && Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            BotLog.Warning($"MyParser Bilibili 直播片段临时文件删除失败: file={localPath}, error={ex.Message}");
+        }
     }
 
     private async Task SendLiveForwardAsync(IncomingMessage message, BilibiliLiveParseResult result)
@@ -183,7 +216,6 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         else if (result.OnlineCount > 0) sb.AppendLine($"人气值：{FormatCount(result.OnlineCount)}");
         if (result.LiveStartTime is not null) sb.AppendLine($"开播时间：{result.LiveStartTime:yyyy-MM-dd HH:mm:ss}");
         if (result.LiveDuration is not null) sb.AppendLine($"直播时长：{FormatDuration(result.LiveDuration.Value)}");
-        if (!string.IsNullOrWhiteSpace(result.CoverUrl)) sb.AppendLine($"封面：{result.CoverUrl}");
         if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");
         sb.AppendLine($"播放流：{result.Streams.Count} 条，见后续转发节点。");
         AppendRecommendedLiveStreams(sb, result);

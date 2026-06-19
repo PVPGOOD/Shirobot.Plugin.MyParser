@@ -15,7 +15,7 @@ internal sealed class DouyinParser : IDisposable
     private readonly DouyinVideoDownloader _videoDownloader;
     private readonly DouyinLoginStatusChecker _loginStatusChecker;
 
-    public DouyinParser(MyParserConfig config, HttpClient? httpClient = null)
+    public DouyinParser(PluginConfig config, HttpClient? httpClient = null)
     {
         _ownsHttpClient = httpClient is null;
         _http = httpClient ?? DouyinHttpClientFactory.Create(config);

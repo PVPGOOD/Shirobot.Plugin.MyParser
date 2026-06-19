@@ -7,6 +7,8 @@ using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Facade;
 using Shirobot.Plugin.MyParser.Providers.Xiaohongshu.Impl.MessageHandling;
 using System.Text;
 using Shirobot.Plugin.MyParser.Parsing;
+using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
+using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Core;
@@ -16,11 +18,11 @@ namespace Shirobot.Plugin.MyParser;
 
 [BotPlugin(id: "MyParser",
     Name = "MyParser",
-    Version = "0.1.0",
+    Version = "0.2.0",
     Author = "PVPGood",
     Category = PluginCategory.Utility,
     Description = "面向 Shirobot 的学习型内容消息处理插件。",
-    GithubRepo = "PVPGOOD/Shirobot.Plugin.MyParser/",
+    GithubRepo = "PVPGOOD/Shirobot.Plugin.MyParser",
     IsPluginSingleFile = false)
 ]
 public sealed class MyParserPlugin : PluginBase
@@ -36,7 +38,7 @@ public sealed class MyParserPlugin : PluginBase
     private const string XiaohongshuCookieCheckCommand = "#xhs-cookie-check";
 
     private readonly Lock _reloadLock = new();
-    private MyParserConfig _config = new();
+    private PluginConfig _config = new();
     private FileSystemWatcher? _configWatcher;
     private FileSystemWatcher? _cookieWatcher;
     private CancellationTokenSource? _configReloadDebounce;
@@ -56,7 +58,9 @@ public sealed class MyParserPlugin : PluginBase
 
     protected override async Task LoadAsync()
     {
-        _config = Context.Config.Load<MyParserConfig>();
+        MyParserRuntime.ResetForLoad();
+        MessageHandlerCommon.ClearReactionCache();
+        _config = Context.Config.Load<PluginConfig>();
         NormalizeRuntimeDirectories();
         LoadDouyinCookieFromPluginDirectory();
         LoadBilibiliCookieFromPluginDirectory();
@@ -380,7 +384,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private void ReloadConfigNow()
     {
-        var updated = Context.Config.Load<MyParserConfig>();
+        var updated = Context.Config.Load<PluginConfig>();
         ApplyConfigValues(_config, updated);
         BotLog.Info("MyParser 配置已热重载。注意：命令热重载仅支持 #parse 前缀；登录/Cookie 检查命令为固定命令。 ");
     }
@@ -393,9 +397,9 @@ public sealed class MyParserPlugin : PluginBase
         BotLog.Info("MyParser Cookie 文件已热重载。 ");
     }
 
-    private static void ApplyConfigValues(MyParserConfig target, MyParserConfig source)
+    private static void ApplyConfigValues(PluginConfig target, PluginConfig source)
     {
-        foreach (var property in typeof(MyParserConfig).GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public))
+        foreach (var property in typeof(PluginConfig).GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public))
         {
             if (!property.CanRead || !property.CanWrite)
             {
@@ -422,6 +426,8 @@ public sealed class MyParserPlugin : PluginBase
 
     protected override Task OnUnloadAsync()
     {
+        MyParserRuntime.BeginUnload();
+        MessageHandlerCommon.ClearReactionCache();
         _configReloadDebounce?.Cancel();
         _configReloadDebounce?.Dispose();
         _configReloadDebounce = null;
@@ -501,7 +507,12 @@ public sealed class MyParserPlugin : PluginBase
             }
         }
 
-        var provider = _providerRegistry?.FindProvider(message, out _);
+        var parseText = GetStrictAutoParseText(message);
+        var provider = string.IsNullOrWhiteSpace(parseText) ? null : _providerRegistry?.FindProvider(parseText);
+        if (provider is null && _providerRegistry?.FindProvider(message, out _) is { } fallbackProvider && !IsBilibiliProvider(fallbackProvider.Id))
+        {
+            provider = fallbackProvider;
+        }
         return provider?.Id switch
         {
             "douyin" => _config.AutoParseDouyinLinks,
@@ -518,12 +529,46 @@ public sealed class MyParserPlugin : PluginBase
     {
         if (TryBuildBilibiliPageLinkFromReply(message, out var pageLink))
         {
-            return DispatchParseAsync(message, pageLink);
+            return DispatchParseAsync(message, pageLink, silentProviderMismatch: true);
         }
 
-        return _providerRegistry?.FindProvider(message, out var parseText) is not null && !string.IsNullOrWhiteSpace(parseText)
-            ? DispatchParseAsync(message, parseText)
-            : Task.CompletedTask;
+        var parseText = GetStrictAutoParseText(message);
+        if (!string.IsNullOrWhiteSpace(parseText) && _providerRegistry?.FindProvider(parseText) is not null)
+        {
+            return DispatchParseAsync(message, parseText, silentProviderMismatch: true);
+        }
+
+        if (_providerRegistry?.FindProvider(message, out parseText) is { } fallbackProvider && !IsBilibiliProvider(fallbackProvider.Id) && !string.IsNullOrWhiteSpace(parseText))
+        {
+            return DispatchParseAsync(message, parseText, silentProviderMismatch: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static bool IsBilibiliProvider(string providerId)
+    {
+        return providerId.StartsWith("bilibili", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetStrictAutoParseText(IncomingMessage message)
+    {
+        var text = GetPlainText(message);
+        var strict = BilibiliUrlParser.ExtractStrictBilibiliUrl(text);
+        if (strict is not null)
+        {
+            return strict;
+        }
+
+        var standalone = BilibiliUrlParser.NormalizeStandaloneBilibiliId(text);
+        if (standalone is not null)
+        {
+            return standalone;
+        }
+
+        return BilibiliLightAppUrlExtractor.ExtractParseText(message) is { } extracted
+            ? BilibiliUrlParser.ExtractStrictBilibiliUrl(extracted)
+            : null;
     }
 
     private Task HandleParseCommandAsync(IncomingMessage message)
@@ -714,8 +759,9 @@ public sealed class MyParserPlugin : PluginBase
                || text.StartsWith("Xiaohongshu", StringComparison.OrdinalIgnoreCase);
     }
 
-    private Task DispatchParseAsync(IncomingMessage message, string text)
+    private Task DispatchParseAsync(IncomingMessage message, string text, bool silentProviderMismatch = false)
     {
+        text = BilibiliUrlParser.NormalizeStandaloneBilibiliId(text) ?? text;
         if (IsBilibiliPageTemplateLink(text))
         {
             return Task.CompletedTask;
@@ -725,10 +771,10 @@ public sealed class MyParserPlugin : PluginBase
         return provider?.Id switch
         {
             "douyin" => _douyinMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
-            "bilibili" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
-            "bilibili-article" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
-            "bilibili-bangumi" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
-            "bilibili-live" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
+            "bilibili" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
+            "bilibili-article" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
+            "bilibili-bangumi" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
+            "bilibili-live" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
             "xiaohongshu" => _xiaohongshuMessageHandler?.ParseAndReplyAsync(message, text) ?? Task.CompletedTask,
             _ => Context.Message.ReplyAsync(message, "未找到可处理该链接的解析提供商。"),
         };

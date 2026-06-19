@@ -3,63 +3,146 @@
              xmlns:vm="using:Shirobot.Plugin.MyParser.Providers.Bilibili.ViewModels"
              x:Class="Shirobot.Plugin.MyParser.Providers.Bilibili.Views.BiliArticleCard"
              x:DataType="vm:BiliArticleCardViewModel"
-             Width="360" Height="640">
+             Width="360" MinHeight="150">
     <Design.DataContext>
         <vm:BiliArticleCardViewModel />
     </Design.DataContext>
 
-    <Border Width="360" Height="640" CornerRadius="28" ClipToBounds="True" Background="#101014">
-        <Canvas Width="360" Height="640">
-            <Image Canvas.Left="0" Canvas.Top="0" Width="360" Height="640" Source="{Binding Cover}" Stretch="UniformToFill" Opacity="0.18" />
-            <Border Canvas.Left="0" Canvas.Top="0" Width="360" Height="640" Background="#DD101014" />
-            <Ellipse Canvas.Left="-70" Canvas.Top="-80" Width="220" Height="220" Fill="#30FB7299" />
-            <Ellipse Canvas.Left="230" Canvas.Top="120" Width="170" Height="170" Fill="#2400AEEC" />
+    <UserControl.Styles>
+        <Style Selector="Border.PremiumCard">
+            <Setter Property="BoxShadow" Value="0 8 24 0 #1A000000"/>
+        </Style>
+    </UserControl.Styles>
 
-            <Border Canvas.Left="20" Canvas.Top="24" Width="320" Height="96" CornerRadius="24" Background="#F41D1B20" BorderBrush="#30CAC4D0" BorderThickness="1" Padding="14">
-                <Grid ColumnDefinitions="52,*,Auto">
-                    <Border Grid.Column="0" Width="44" Height="44" CornerRadius="22" ClipToBounds="True" Background="#2B2930" BorderBrush="#FB7299" BorderThickness="2" VerticalAlignment="Center">
-                        <Image Source="{Binding Avatar}" Stretch="UniformToFill" />
-                    </Border>
-                    <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="{Binding AuthorName}" Foreground="#F4EFF4" FontSize="14" FontWeight="SemiBold" MaxWidth="150" TextTrimming="CharacterEllipsis" />
-                            <Border Background="#FB7299" CornerRadius="999" Padding="6,2" VerticalAlignment="Center">
-                                <TextBlock Text="UP" Foreground="White" FontSize="9" FontWeight="Bold" />
-                            </Border>
-                        </StackPanel>
-                        <TextBlock Text="{Binding AuthorMeta}" Foreground="#CAC4D0" FontSize="11" MaxWidth="200" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <Border Grid.Column="2" CornerRadius="999" Background="#29FB7299" Padding="8,4" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding KindText}" Foreground="#FFD8E7" FontSize="10" FontWeight="SemiBold" />
-                    </Border>
-                </Grid>
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="CardFallbackBg">#F5F5F5</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextPrimary">#1A1A1A</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextSecondary">#3F3F3F</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextMuted">#656565</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBg">#CCFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBorder">#33FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagBg">#1A000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagText">#4A4A4A</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardShareColor">#5F5F5F</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardImageOverlay">#4DFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBg">#59000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationText">#FFFFFF</SolidColorBrush>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="CardFallbackBg">#121212</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextPrimary">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextSecondary">#ECECEC</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextMuted">#CCCCCC</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBg">#33000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagBg">#2BFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagText">#E5E5E5</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardShareColor">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardImageOverlay">#66000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBg">#4D000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="DurationText">#EAEAEA</SolidColorBrush>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <SolidColorBrush x:Key="YellowVBorder">#111111</SolidColorBrush>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Border Classes="PremiumCard"
+            Width="360"
+            MinHeight="150"
+            CornerRadius="8"
+            ClipToBounds="True"
+            Background="{DynamicResource CardFallbackBg}">
+        <Grid>
+            <Border Margin="-40">
+                <Border.Effect>
+                    <BlurEffect Radius="26" />
+                </Border.Effect>
+                <Border.Background>
+                    <ImageBrush Source="{Binding Cover}" Stretch="UniformToFill" />
+                </Border.Background>
             </Border>
+            <Border Background="{DynamicResource CardImageOverlay}" />
 
-            <Border Canvas.Left="20" Canvas.Top="136" Width="320" Height="182" CornerRadius="24" ClipToBounds="True" Background="#1B1B20" BorderBrush="#33FFFFFF" BorderThickness="1">
-                <Grid>
-                    <Image Source="{Binding Cover}" Stretch="UniformToFill" />
-                    <Border Background="#66000000" />
-                    <TextBlock Text="{Binding ImageCountText}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,12" Foreground="White" FontSize="11" FontWeight="SemiBold" />
-                </Grid>
-            </Border>
-
-            <Border Canvas.Left="20" Canvas.Top="334" Width="320" Height="282" CornerRadius="28" Background="#F41D1B20" BorderBrush="#30CAC4D0" BorderThickness="1" Padding="16">
+            <StackPanel VerticalAlignment="Bottom" Margin="20" Spacing="16">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="{Binding Title}" Foreground="#F4EFF4" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" MaxLines="3" LineHeight="24" />
-                    <TextBlock Text="{Binding Summary}" Foreground="#CAC4D0" FontSize="12" TextWrapping="Wrap" MaxLines="5" LineHeight="18" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Border CornerRadius="999" Padding="10,5" Background="#2A00AEEC" BorderBrush="#6600AEEC" BorderThickness="1">
-                            <TextBlock Text="{Binding TagsText}" Foreground="#A6EDFF" FontSize="11" FontWeight="Medium" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Width="40" Height="40" Margin="0,0,12,0">
+                            <Border CornerRadius="20" BorderBrush="#FB7299" BorderThickness="1.5" ClipToBounds="True">
+                                <Image Source="{Binding Avatar}" Width="40" Height="40" Stretch="UniformToFill" />
+                            </Border>
+                            <Border Background="#FFB020" Width="14" Height="14" CornerRadius="7"
+                                    BorderBrush="{StaticResource YellowVBorder}" BorderThickness="1"
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2">
+                                <TextBlock Text="⚡" FontSize="8" Foreground="White" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" />
+                            </Border>
+                        </Grid>
+
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding AuthorName}" Foreground="{DynamicResource CardTextPrimary}" FontSize="14" FontWeight="Bold" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+                                <Border Background="#FB7299" CornerRadius="4" Padding="5,2" VerticalAlignment="Center">
+                                    <TextBlock Text="UP" Foreground="White" FontSize="9" FontWeight="Black" Margin="0,-1,0,0" />
+                                </Border>
+                            </StackPanel>
+                            <TextBlock Text="{Binding AuthorMeta}" Foreground="{DynamicResource CardTextMuted}" FontSize="11" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+
+                        <Border Grid.Column="2" VerticalAlignment="Top" Padding="8,4"
+                                Background="{DynamicResource DurationBg}"
+                                BorderBrush="{DynamicResource DurationBorder}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <TextBlock Text="{Binding KindText}" Foreground="{DynamicResource DurationText}" FontSize="11" FontWeight="Medium" />
                         </Border>
-                        <Border CornerRadius="999" Padding="10,5" Background="#2AFB7299" BorderBrush="#66FB7299" BorderThickness="1">
-                            <TextBlock Text="{Binding PublishTimeText}" Foreground="#FFD8E7" FontSize="11" FontWeight="Medium" />
+                    </Grid>
+
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Title}"
+                                   Foreground="{DynamicResource CardTextPrimary}"
+                                   FontSize="16"
+                                   FontWeight="Heavy"
+                                   TextWrapping="Wrap"
+                                   MaxLines="3"
+                                   LineHeight="22" />
+                        <TextBlock Text="{Binding Summary}"
+                                   Foreground="{DynamicResource CardTextSecondary}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   MaxLines="4"
+                                   LineHeight="18" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border Background="{DynamicResource CardTagBg}" CornerRadius="6" Padding="8,4">
+                            <TextBlock Text="{Binding TagsText}" Foreground="{DynamicResource CardTagText}" FontSize="11" FontWeight="Medium" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+                        </Border>
+                        <Border Background="{DynamicResource CardTagBg}" CornerRadius="6" Padding="8,4">
+                            <TextBlock Text="{Binding PublishTimeText}" Foreground="{DynamicResource CardTagText}" FontSize="11" FontWeight="Medium" />
                         </Border>
                     </StackPanel>
-                    <Border CornerRadius="18" Background="#2B2930" BorderBrush="#30CAC4D0" BorderThickness="1" Padding="12,10">
-                        <TextBlock Text="{Binding StatsText}" Foreground="#F4EFF4" FontSize="12" TextWrapping="Wrap" LineHeight="18" />
-                    </Border>
                 </StackPanel>
-            </Border>
-        </Canvas>
+
+                <Border Background="{DynamicResource CardPanelBg}" BorderBrush="{DynamicResource CardPanelBorder}" BorderThickness="1" CornerRadius="12" Padding="12,10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding StatsText}" Foreground="{DynamicResource CardTextPrimary}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="18" />
+                        <TextBlock Grid.Column="1" Text="{Binding ImageCountText}" Foreground="{DynamicResource CardShareColor}" FontSize="12" FontWeight="SemiBold" Margin="12,0,0,0" VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
+    </StackPanel>
+        </Grid>
     </Border>
 </UserControl>

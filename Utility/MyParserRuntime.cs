@@ -5,6 +5,8 @@ namespace Shirobot.Plugin.MyParser;
 internal static class MyParserRuntime
 {
     private static readonly ConcurrentDictionary<string, Lazy<Task<(string FileUri, string LocalPath)>>> VideoDownloadCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Lock BackgroundLock = new();
+    private static CancellationTokenSource BackgroundCancellation = new();
 
     public static string DouyinCookie { get; set; } = string.Empty;
 
@@ -17,6 +19,45 @@ internal static class MyParserRuntime
     public static string BilibiliDownloadDirectory { get; set; } = string.Empty;
 
     public static string XiaohongshuDownloadDirectory { get; set; } = string.Empty;
+
+    public static CancellationToken BackgroundCancellationToken
+    {
+        get
+        {
+            lock (BackgroundLock)
+            {
+                return BackgroundCancellation.Token;
+            }
+        }
+    }
+
+    public static void ResetForLoad()
+    {
+        lock (BackgroundLock)
+        {
+            if (BackgroundCancellation.IsCancellationRequested)
+            {
+                BackgroundCancellation.Dispose();
+                BackgroundCancellation = new CancellationTokenSource();
+            }
+        }
+    }
+
+    public static void BeginUnload()
+    {
+        lock (BackgroundLock)
+        {
+            BackgroundCancellation.Cancel();
+        }
+
+        VideoDownloadCache.Clear();
+        DouyinCookie = string.Empty;
+        BilibiliCookie = string.Empty;
+        XiaohongshuCookie = string.Empty;
+        DownloadDirectory = string.Empty;
+        BilibiliDownloadDirectory = string.Empty;
+        XiaohongshuDownloadDirectory = string.Empty;
+    }
 
     public static bool IsCachedVideoPath(string path)
     {

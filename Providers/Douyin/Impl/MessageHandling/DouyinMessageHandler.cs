@@ -23,14 +23,14 @@ internal sealed class DouyinMessageHandler : IDisposable
     private static readonly HttpClient CoverHttp = RemoteImageFetchService.CreateImageHttpClient();
 
     private readonly IBotContext _context;
-    private readonly MyParserConfig _config;
+    private readonly PluginConfig _config;
     private readonly ParseProviderRegistry _providerRegistry;
     private readonly DouyinParseProvider _douyinProvider;
     private LocalVideoHttpServer? _localVideoHttpServer;
 
     public DouyinMessageHandler(
         IBotContext context,
-        MyParserConfig config,
+        PluginConfig config,
         ParseProviderRegistry providerRegistry,
         DouyinParseProvider douyinProvider)
     {
@@ -45,7 +45,7 @@ internal sealed class DouyinMessageHandler : IDisposable
         await TryReactToSourceMessageAsync(message, "351");
         if (_providerRegistry is null)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await _context.Message.ReplyAsync(message, "解析器尚未初始化，请稍后重试。");
             return;
         }
@@ -55,13 +55,13 @@ internal sealed class DouyinMessageHandler : IDisposable
             var media = await _providerRegistry.ParseAsync(text);
             if (media.ProviderPayload is not DouyinParseResult result)
             {
-                await TryReactToSourceMessageAsync(message, "379");
+                await TryReactToSourceMessageAsync(message, "9");
                 await _context.Message.ReplyAsync(message, $"{media.ProviderName} 已识别，但该平台发送流程尚未接入。");
                 return;
             }
 
             LogDouyinQualityInfo(result);
-            var shouldDownloadVideo = _config.SendVideoAsFile && result.IsVideo && !result.IsGallery;
+            var shouldDownloadVideo = _config.SendVideoSegment && result.IsVideo && !result.IsGallery;
             var videoSent = false;
             var fileUploaded = false;
             string? videoSendError = null;
@@ -75,7 +75,7 @@ internal sealed class DouyinMessageHandler : IDisposable
                     var videoSegment = await BuildVideoSegmentAsync(result);
                     if (videoSegment is null)
                     {
-                        await TryReactToSourceMessageAsync(message, "379");
+                        await TryReactToSourceMessageAsync(message, "9");
                         await _context.Message.ReplyAsync(message, "视频解析成功，但没有生成 VideoSegment。");
                         return;
                     }
@@ -131,13 +131,13 @@ internal sealed class DouyinMessageHandler : IDisposable
                         catch (Exception uploadEx)
                         {
                             BotLog.Warning($"MyParser VideoSegment 失败后文件上传也失败: aweme_id={result.AwemeId}, error={uploadEx.Message}");
-                            await TryReactToSourceMessageAsync(message, "379");
+                            await TryReactToSourceMessageAsync(message, "9");
                             await _context.Message.ReplyAsync(message, "视频发送失败，文件上传也失败：" + uploadEx.Message);
                             return;
                         }
                     }
 
-                    await TryReactToSourceMessageAsync(message, "379");
+                    await TryReactToSourceMessageAsync(message, "9");
                     await _context.Message.ReplyAsync(message, "视频发送失败：" + ex.Message);
                     return;
                 }
@@ -173,17 +173,17 @@ internal sealed class DouyinMessageHandler : IDisposable
         }
         catch (DouyinParseException ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await _context.Message.ReplyAsync(message, "解析失败：" + ex.Message);
         }
         catch (TaskCanceledException)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await _context.Message.ReplyAsync(message, "解析超时，请稍后重试。若经常失败，请配置有效 DouyinCookie。");
         }
         catch (Exception ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             BotLog.Error($"MyParser 解析异常：{ex}");
             await _context.Message.ReplyAsync(message, "解析异常：" + ex.Message);
         }
@@ -233,7 +233,7 @@ internal sealed class DouyinMessageHandler : IDisposable
 
     private async Task<VideoOutgoingSegment?> BuildVideoSegmentAsync(DouyinParseResult result)
     {
-        if (!_config.SendVideoAsFile || _douyinProvider is null || result.IsGallery || !result.IsVideo)
+        if (!_config.SendVideoSegment || _douyinProvider is null || result.IsGallery || !result.IsVideo)
         {
             return null;
         }
@@ -244,17 +244,14 @@ internal sealed class DouyinMessageHandler : IDisposable
         LogFinalVideoFileInfo(result);
 
         var fileSize = new FileInfo(localPath).Length;
-        var base64LimitBytes = Math.Max(0, _config.VideoSegmentBase64MaxMegabytes) * 1024L * 1024L;
-        var useBase64 = _config.SendVideoSegmentAsBase64
-                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, _config.VideoSegmentBase64MaxMegabytes);
         string videoUri;
         string uriMode;
-        if (useBase64)
+        if (_config.FileProtocol == VideoSegmentFileProtocol.Base64)
         {
             videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
             uriMode = "base64";
         }
-        else if (_config.UseLocalHttpServerForLargeVideoSegment)
+        else if (_config.FileProtocol == VideoSegmentFileProtocol.Http)
         {
             videoUri = GetLocalVideoHttpServer().RegisterFile(localPath);
             result.LocalVideoRegisteredToHttpServer = true;
@@ -266,8 +263,8 @@ internal sealed class DouyinMessageHandler : IDisposable
             uriMode = "file";
         }
 
-        BotLog.Info($"MyParser VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, base64_limit_mb={_config.VideoSegmentBase64MaxMegabytes}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
-        var thumbUri = _config.IncludeVideoThumbUri && !string.IsNullOrWhiteSpace(result.CoverUrl)
+        BotLog.Info($"MyParser VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
+        var thumbUri = !string.IsNullOrWhiteSpace(result.CoverUrl)
             ? result.CoverUrl
             : null;
         return new VideoOutgoingSegment(videoUri, thumbUri);
@@ -275,11 +272,7 @@ internal sealed class DouyinMessageHandler : IDisposable
 
     private LocalVideoHttpServer GetLocalVideoHttpServer()
     {
-        return _localVideoHttpServer ??= new LocalVideoHttpServer(
-            _config.LocalVideoHttpHost,
-            _config.LocalVideoHttpPort,
-            _config.LocalVideoHttpPublicBaseUrl,
-            _config.AllowLanAccessToLocalVideoHttpServer);
+        return _localVideoHttpServer ??= new LocalVideoHttpServer();
     }
 
 private void LogFinalVideoFileInfo(DouyinParseResult result)
@@ -351,7 +344,7 @@ private void LogFinalVideoFileInfo(DouyinParseResult result)
 
     private void EnsureVideoSendAccepted(long messageSeq, string scene)
     {
-        if (_config.TreatZeroMessageSeqAsVideoSendFailure && messageSeq <= 0)
+        if (messageSeq <= 0)
         {
             throw new InvalidOperationException($"VideoSegment 发送返回 message_seq={messageSeq}，可能被适配器或平台拒绝，按发送失败处理以触发文件上传 fallback。scene={scene}");
         }
@@ -373,12 +366,11 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
             return;
         }
 
-        var max = Math.Clamp(_config.MaxImagesToShow, 1, 20);
         var forwardedMessages = new List<OutgoingForwardedMessage>();
         var senderId = GetBotOrSenderId(message);
         var senderName = string.IsNullOrWhiteSpace(result.AuthorName) ? "抖音图文" : result.AuthorName!;
 
-        var imageInputs = result.Images.Take(max).Select((image, index) => (image, Index: index + 1)).ToArray();
+        var imageInputs = result.Images.Select((image, index) => (image, Index: index + 1)).ToArray();
         var imageFiles = await MessageFetchConcurrency.SelectParallelOrderedAsync(
             imageInputs,
             MessageFetchConcurrency.DefaultImageConcurrency,
@@ -404,10 +396,8 @@ private async Task SendGalleryMessageAsync(IncomingMessage message, DouyinParseR
         }
 
         var title = string.IsNullOrWhiteSpace(result.Title) ? "抖音图文" : TrimLine(result.Title, 48);
-        var preview = result.Images.Take(Math.Min(4, max)).Select((_, index) => $"图片 {index + 1}").ToArray();
-        var summary = result.Images.Count > max
-            ? $"共 {result.Images.Count} 张，已发送前 {max} 张"
-            : $"共 {result.Images.Count} 张";
+        var preview = result.Images.Take(4).Select((_, index) => $"图片 {index + 1}").ToArray();
+        var summary = $"共 {result.Images.Count} 张";
         var forward = new ForwardOutgoingSegment(forwardedMessages, title, preview, summary, "抖音图文");
         var stopwatch = Stopwatch.StartNew();
         BotLog.Info($"MyParser 图文合并转发发送开始: aweme_id={result.AwemeId}, scene={GetMessageScene(message)}, images={forwardedMessages.Count}/{result.Images.Count}");
@@ -771,57 +761,25 @@ private static void LogCoverImageInfo(DouyinParseResult result, string mode, lon
             sb.AppendLine($"作者：{result.AuthorName}");
         }
 
-        if (_config.IncludeCoverUrl && !string.IsNullOrWhiteSpace(result.CoverUrl))
-        {
-            sb.AppendLine($"封面：{result.CoverUrl}");
-        }
-
         if (result.IsGallery)
         {
             sb.AppendLine($"图片数：{result.Images.Count}");
-            if (_config.IncludeRawMediaUrls)
-            {
-                var max = Math.Clamp(_config.MaxImagesToShow, 1, 20);
-                foreach (var (image, index) in result.Images.Take(max).Select((image, index) => (image, index + 1)))
-                {
-                    sb.AppendLine($"图{index}：{image.Url}");
-                    if (!string.IsNullOrWhiteSpace(image.LivePhotoUrl))
-                    {
-                        sb.AppendLine($"Live{index}：{image.LivePhotoUrl}");
-                    }
-                }
-
-                if (result.Images.Count > max)
-                {
-                    sb.AppendLine($"……还有 {result.Images.Count - max} 张未展示");
-                }
-            }
-            else
-            {
-                sb.AppendLine("图集：已解析，未展示直链");
-            }
+            sb.AppendLine("图集：已解析，未展示直链");
         }
         else if (!string.IsNullOrWhiteSpace(result.VideoUrl))
         {
             var quality = result.Qualities.FirstOrDefault();
-            if (_config.IncludeRawMediaUrls)
+            var videoStatus = videoSent
+                ? "视频：已下载并已调用 VideoSegment 发送接口"
+                : videoDownloadAttempted
+                    ? $"视频：下载或发送失败，已隐藏直链；原因：{TrimLine(videoSendError ?? "未知错误", 80)}"
+                    : "视频：已解析，未展示直链";
+            sb.AppendLine(videoStatus);
+            if (_config.UploadVideoAsFile)
             {
-                sb.AppendLine($"视频：{result.VideoUrl}");
-            }
-            else
-            {
-                var videoStatus = videoSent
-                    ? $"视频：已下载并已调用 VideoSegment 发送接口（{(_config.SendVideoSegmentAsBase64 ? "base64" : "file")}）"
-                    : videoDownloadAttempted
-                        ? $"视频：下载或发送失败，已隐藏直链；原因：{TrimLine(videoSendError ?? "未知错误", 80)}；如需排查可开启 IncludeRawMediaUrls"
-                        : "视频：已解析，未展示直链";
-                sb.AppendLine(videoStatus);
-                if (_config.UploadVideoAsFile)
-                {
-                    sb.AppendLine(fileUploaded
-                        ? $"文件上传：已上传为{fileUploadInfo}"
-                        : $"文件上传：失败或未执行；原因：{TrimLine(fileUploadInfo ?? "未知", 80)}");
-                }
+                sb.AppendLine(fileUploaded
+                    ? $"文件上传：已上传为{fileUploadInfo}"
+                    : $"文件上传：失败或未执行；原因：{TrimLine(fileUploadInfo ?? "未知", 80)}");
             }
 
             if (quality is not null)

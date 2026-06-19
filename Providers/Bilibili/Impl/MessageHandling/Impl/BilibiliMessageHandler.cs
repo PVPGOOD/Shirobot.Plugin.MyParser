@@ -14,16 +14,18 @@ namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.MessageHandling.Impl;
 
 internal sealed partial class BilibiliMessageHandler(
     IBotContext context,
-    MyParserConfig config,
+    PluginConfig config,
     ParseProviderRegistry providerRegistry,
     BilibiliParseProvider bilibiliProvider)
     : IDisposable
 {
     private static readonly HttpClient CoverHttp = RemoteImageFetchService.CreateImageHttpClient();
 
+    private readonly Lock _subscriptionLock = new();
+    private readonly List<IReplySubscription> _replySubscriptions = [];
     private LocalVideoHttpServer? _localVideoHttpServer;
 
-    public async Task ParseAndReplyAsync(IncomingMessage message, string text)
+    public async Task ParseAndReplyAsync(IncomingMessage message, string text, bool silentProviderMismatch = false)
     {
         try
         {
@@ -72,7 +74,7 @@ internal sealed partial class BilibiliMessageHandler(
             }
 
             LogBilibiliQualityInfo(result);
-            if (!config.SendVideoAsFile || !result.IsVideo)
+            if (!config.SendVideoSegment || !result.IsVideo)
             {
                 await ReplyAsync(message, FormatBilibiliResult(result, videoDownloadAttempted: false));
                 await TryReactToSourceMessageAsync(message, "426");
@@ -126,26 +128,31 @@ internal sealed partial class BilibiliMessageHandler(
             }
 
             await ReplyAsync(message, FormatBilibiliResult(result, true, videoSent, videoSendError, fileUploaded, fileUploadInfo));
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
         }
         catch (BilibiliLoginRequiredException ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await ReplyAsync(message, "Bilibili 解析需要登录：" + ex.Message);
+        }
+        catch (BilibiliParseException ex) when (silentProviderMismatch && IsAutoParseProviderMismatch(ex))
+        {
+            await MessageHandlerCommon.RemoveReactionAsync(context, message, "351", "Bilibili");
+            BotLog.Info($"MyParser Bilibili 自动解析忽略非目标链接: error={ex.Message}");
         }
         catch (BilibiliParseException ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await ReplyAsync(message, "Bilibili 解析未完成：" + ex.Message);
         }
         catch (TaskCanceledException)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             await ReplyAsync(message, "Bilibili 解析超时，请稍后再试。若经常超时，请检查 BilibiliCookie/网络/ffmpeg。");
         }
         catch (Exception ex)
         {
-            await TryReactToSourceMessageAsync(message, "379");
+            await TryReactToSourceMessageAsync(message, "9");
             BotLog.Error($"MyParser Bilibili 解析异常：{ex}");
             await ReplyAsync(message, "Bilibili 解析异常：" + ex.Message);
         }
@@ -154,6 +161,19 @@ internal sealed partial class BilibiliMessageHandler(
     private Task TryReactToSourceMessageAsync(IncomingMessage message, string faceId)
     {
         return MessageHandlerCommon.ReactAsync(context, message, faceId, "Bilibili");
+    }
+
+    private static bool IsAutoParseProviderMismatch(BilibiliParseException ex)
+    {
+        var message = ex.Message;
+        return message.Contains("无法从输入中提取", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("短链接跳转后未找到", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是视频", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是专栏", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是图文", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("不是动态", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("接口错误 -400", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("请求错误", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task HandleLoginAsync(IncomingMessage message)
@@ -211,16 +231,14 @@ internal sealed partial class BilibiliMessageHandler(
         LogFinalVideoFileInfo(result);
 
         var fileSize = new FileInfo(localPath).Length;
-        var useBase64 = config.SendVideoSegmentAsBase64
-                        && MemorySafetyUtilities.CanUseBase64ForFile(fileSize, config.VideoSegmentBase64MaxMegabytes);
         string videoUri;
         string uriMode;
-        if (useBase64)
+        if (config.FileProtocol == VideoSegmentFileProtocol.Base64)
         {
             videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
             uriMode = "base64";
         }
-        else if (config.UseLocalHttpServerForLargeVideoSegment)
+        else if (config.FileProtocol == VideoSegmentFileProtocol.Http)
         {
             videoUri = GetLocalVideoHttpServer().RegisterFile(localPath);
             result.LocalVideoRegisteredToHttpServer = true;
@@ -232,8 +250,8 @@ internal sealed partial class BilibiliMessageHandler(
             uriMode = "file";
         }
 
-        BotLog.Info($"MyParser Bilibili VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, base64_limit_mb={config.VideoSegmentBase64MaxMegabytes}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
-        var thumbUri = config.IncludeVideoThumbUri && !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
+        BotLog.Info($"MyParser Bilibili VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={MediaUriUtilities.PreviewUri(videoUri)}");
+        var thumbUri = !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
         return new VideoOutgoingSegment(videoUri, thumbUri);
     }
 
@@ -278,7 +296,7 @@ internal sealed partial class BilibiliMessageHandler(
 
     private void EnsureVideoSendAccepted(long messageSeq, string scene)
     {
-        if (config.TreatZeroMessageSeqAsVideoSendFailure && messageSeq <= 0)
+        if (messageSeq <= 0)
         {
             throw new InvalidOperationException($"VideoSegment 发送返回 message_seq={messageSeq}，未取得有效消息序号，改为文件上传。scene={scene}");
         }
@@ -357,9 +375,8 @@ internal sealed partial class BilibiliMessageHandler(
 
     private void SubscribeBilibiliPageReply(BilibiliMultiPageParseResult result, long promptMessageSeq)
     {
-        IReplySubscription? subscription = null;
-        var subscription1 = subscription;
-        context.Message.SubscribeReply(promptMessageSeq, TimeSpan.FromMinutes(10), async reply =>
+        IReplySubscription? subscription;
+        subscription = context.Message.SubscribeReply(promptMessageSeq, TimeSpan.FromMinutes(10), async reply =>
         {
             var text = reply switch
             {
@@ -381,14 +398,33 @@ internal sealed partial class BilibiliMessageHandler(
                 return;
             }
 
-            subscription1?.Dispose();
             await ParseAndReplyAsync(reply, $"https://www.bilibili.com/video/{result.Bvid}/?p={page}");
         }, disposeOnReply: false);
+
+        lock (_subscriptionLock)
+        {
+            _replySubscriptions.Add(subscription);
+        }
+    }
+
+    private void DisposeReplySubscriptions()
+    {
+        IReplySubscription[] subscriptions;
+        lock (_subscriptionLock)
+        {
+            subscriptions = _replySubscriptions.ToArray();
+            _replySubscriptions.Clear();
+        }
+
+        foreach (var subscription in subscriptions)
+        {
+            subscription.Dispose();
+        }
     }
 
     private LocalVideoHttpServer GetLocalVideoHttpServer()
     {
-        return _localVideoHttpServer ??= new LocalVideoHttpServer(config.LocalVideoHttpHost, config.LocalVideoHttpPort, config.LocalVideoHttpPublicBaseUrl, config.AllowLanAccessToLocalVideoHttpServer);
+        return _localVideoHttpServer ??= new LocalVideoHttpServer();
     }
 
     private void LogFinalVideoFileInfo(BilibiliParseResult result)
@@ -512,7 +548,6 @@ internal sealed partial class BilibiliMessageHandler(
         if (!string.IsNullOrWhiteSpace(result.Title)) sb.AppendLine($"标题：{TrimLine(result.Title, 140)}");
         if (!string.IsNullOrWhiteSpace(result.PartTitle)) sb.AppendLine($"分P：P{result.Page} {TrimLine(result.PartTitle, 80)}");
         if (!string.IsNullOrWhiteSpace(result.AuthorName)) sb.AppendLine($"UP主：{result.AuthorName}");
-        if (config.IncludeCoverUrl && !string.IsNullOrWhiteSpace(result.CoverUrl)) sb.AppendLine($"封面：{result.CoverUrl}");
         var selected = result.SelectedVideo;
         if (selected is not null) sb.AppendLine($"清晰度：{selected.QualityName} {selected.Width}x{selected.Height} {selected.Fps:0.###}fps {selected.CodecName}");
 
@@ -532,19 +567,9 @@ internal sealed partial class BilibiliMessageHandler(
 
     private static string GetMessageScene(IncomingMessage message) => MessageHandlerCommon.GetMessageScene(message);
 
-    private string ResolveCoverDownloadDirectory()
+    private static string ResolveCoverDownloadDirectory()
     {
         return MyParserRuntime.BilibiliDownloadDirectory;
-    }
-
-    private static string SanitizeLocalFileName(string value)
-    {
-        foreach (var c in Path.GetInvalidFileNameChars())
-        {
-            value = value.Replace(c, '_');
-        }
-
-        return value;
     }
 
     private static string TrimLine(string value, int maxLength)
@@ -555,6 +580,7 @@ internal sealed partial class BilibiliMessageHandler(
 
     public void Dispose()
     {
+        DisposeReplySubscriptions();
         _localVideoHttpServer?.Dispose();
         _localVideoHttpServer = null;
     }

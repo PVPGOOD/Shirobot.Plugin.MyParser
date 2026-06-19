@@ -6,7 +6,7 @@ namespace Shirobot.Plugin.MyParser.Providers.Douyin.Infrastructure;
 
 internal static class DouyinHttpClientFactory
 {
-    public static HttpClient Create(MyParserConfig config)
+    public static HttpClient Create(PluginConfig config)
     {
         var handler = new HttpClientHandler
         {

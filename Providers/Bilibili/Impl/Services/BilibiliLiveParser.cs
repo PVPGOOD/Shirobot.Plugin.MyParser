@@ -7,7 +7,7 @@ using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
 
 namespace Shirobot.Plugin.MyParser.Providers.Bilibili.Impl.Services;
 
-internal sealed class BilibiliLiveParser(HttpClient http, MyParserConfig config)
+internal sealed class BilibiliLiveParser(HttpClient http, PluginConfig config)
 {
     private const string RoomInitApi = "https://api.live.bilibili.com/room/v1/Room/room_init";
     private const string RoomInfoApi = "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom";

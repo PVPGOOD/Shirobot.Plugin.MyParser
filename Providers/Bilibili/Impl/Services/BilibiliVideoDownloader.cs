@@ -13,13 +13,84 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
 
     public async Task<(string FileUri, string LocalPath)> DownloadAndMuxAsync(BilibiliParseResult result, CancellationToken cancellationToken = default)
     {
-        var video = result.SelectedVideo ?? throw new BilibiliParseException("没有可下载的视频流。");
-        var audio = result.SelectedAudio ?? throw new BilibiliParseException("没有可下载的音频流。");
-        var cacheKey = $"bilibili:{result.Bvid}:p{result.Page}:cid{result.Cid}:v{video.QualityId}:{video.CodecName}:a{audio.StreamId}";
-        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, () => DownloadAndMuxCoreAsync(result, video, audio, cancellationToken));
+        var (video, audio, estimatedBytes) = await SelectDownloadStreamsAsync(result, cancellationToken);
+        if (estimatedBytes is not null)
+        {
+            BotLog.Info($"MyParser Bilibili 下载前大小预估: bvid={result.Bvid}, video={FormatSize(video.EstimatedBytes)}, audio={FormatSize(audio.EstimatedBytes)}, total={FormatSize(estimatedBytes.Value)}, limit={config.MaxVideoDownloadMegabytes}MB");
+        }
+
+        var cacheKey = $"bilibili:{result.Bvid}:p{result.Page}:cid{result.Cid}:v{video.Stream.QualityId}:{video.Stream.CodecName}:a{audio.Stream.StreamId}";
+        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, () => DownloadAndMuxCoreAsync(result, video.Stream, audio.Stream, cancellationToken));
         result.LocalVideoPath = downloaded.LocalPath;
         result.LocalVideoFileUri = downloaded.FileUri;
         return downloaded;
+    }
+
+    private async Task<(StreamProbe Video, StreamProbe Audio, long? EstimatedBytes)> SelectDownloadStreamsAsync(BilibiliParseResult result, CancellationToken cancellationToken)
+    {
+        var videos = result.VideoStreams.Count > 0 ? result.VideoStreams : [result.SelectedVideo ?? throw new BilibiliParseException("没有可下载的视频流。")];
+        var audios = result.AudioStreams.Count > 0 ? result.AudioStreams : [result.SelectedAudio ?? throw new BilibiliParseException("没有可下载的音频流。")];
+        var maxBytes = GetMaxBytes();
+        var videoProbes = new List<StreamProbe>();
+        var audioProbes = new List<StreamProbe>();
+
+        foreach (var video in videos)
+        {
+            videoProbes.Add(await ProbeStreamAsync(video, result, "视频流", cancellationToken));
+        }
+
+        foreach (var audio in audios)
+        {
+            audioProbes.Add(await ProbeStreamAsync(audio, result, "音频流", cancellationToken));
+        }
+
+        foreach (var video in videoProbes)
+        {
+            foreach (var audio in audioProbes)
+            {
+                var estimated = EstimateTotalBytes(video.EstimatedBytes, audio.EstimatedBytes);
+                if (IsWithinLimit(video.EstimatedBytes, maxBytes)
+                    && IsWithinLimit(audio.EstimatedBytes, maxBytes)
+                    && IsWithinLimit(estimated, maxBytes))
+                {
+                    if (!ReferenceEquals(video.Stream, result.SelectedVideo) || !ReferenceEquals(audio.Stream, result.SelectedAudio))
+                    {
+                        BotLog.Info($"MyParser Bilibili 因文件大小自动降级: bvid={result.Bvid}, quality={video.Stream.QualityName}, fps={video.Stream.Fps}, size={video.Stream.Width}x{video.Stream.Height}, codec={video.Stream.CodecName}, estimated_total={FormatSize(estimated)}");
+                    }
+
+                    return (video, audio, estimated);
+                }
+
+                if (!config.AutoFallbackQualityBySize)
+                {
+                    ThrowTooLarge(video, audio, estimated, maxBytes);
+                }
+            }
+        }
+
+        ThrowTooLarge(videoProbes.First(), audioProbes.First(), EstimateTotalBytes(videoProbes.First().EstimatedBytes, audioProbes.First().EstimatedBytes), maxBytes);
+        throw new UnreachableException();
+    }
+
+    private async Task<StreamProbe> ProbeStreamAsync(BilibiliMediaStream stream, BilibiliParseResult result, string label, CancellationToken cancellationToken)
+    {
+        Exception? lastError = null;
+        foreach (var url in stream.UrlCandidates.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct())
+        {
+            try
+            {
+                var downloader = new MyParser.Services.Downloader(http, _progressLogger);
+                var request = CreateDownloadRequest(stream, url, string.Empty, result, label, GetMaxBytes());
+                var probe = await downloader.ProbeAsync(request, cancellationToken);
+                return new StreamProbe(stream, url, probe.ContentLength);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or BilibiliParseException)
+            {
+                lastError = ex;
+            }
+        }
+
+        throw new BilibiliParseException($"{label}大小探测失败：{lastError?.Message ?? "无可用地址"}");
     }
 
     private async Task<(string FileUri, string LocalPath)> DownloadAndMuxCoreAsync(BilibiliParseResult result, BilibiliMediaStream video, BilibiliMediaStream audio, CancellationToken cancellationToken)
@@ -41,9 +112,28 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
         BotLog.Info($"MyParser Bilibili 音视频流并发下载开始: bvid={result.Bvid}, video={Path.GetFileName(videoPath)}, audio={Path.GetFileName(audioPath)}, output={Path.GetFileName(outputPath)}");
         try
         {
-            await Task.WhenAll(
-                DownloadStreamAsync(video, videoPath, result, "视频流", cancellationToken),
-                DownloadStreamAsync(audio, audioPath, result, "音频流", cancellationToken));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var videoTask = DownloadStreamAsync(video, videoPath, result, "视频流", linkedCts.Token);
+            var audioTask = DownloadStreamAsync(audio, audioPath, result, "音频流", linkedCts.Token);
+            try
+            {
+                await Task.WhenAll(videoTask, audioTask);
+            }
+            catch
+            {
+                await linkedCts.CancelAsync();
+                try
+                {
+                    await Task.WhenAll(videoTask, audioTask);
+                }
+                catch
+                {
+                    // Preserve the original download failure below.
+                }
+
+                throw;
+            }
+
             BotLog.Info($"MyParser Bilibili 音视频流并发下载完成，开始 ffmpeg 合并: bvid={result.Bvid}");
             await MuxAsync(ffmpeg, videoPath, audioPath, outputPath, cancellationToken);
             await ValidateMuxedVideoAsync(outputPath, cancellationToken);
@@ -67,10 +157,7 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
             throw new BilibiliParseException($"{label}没有可用下载地址。");
         }
 
-        var maxBytes = config.MaxVideoDownloadMegabytes <= 0
-            ? long.MaxValue
-            : config.MaxVideoDownloadMegabytes * 1024L * 1024L;
-        const long minParallelBytes = 1;
+        var maxBytes = GetMaxBytes();
         var segmentCount = Math.Clamp(config.ParallelDownloadThreads, 1, 64);
         Exception? lastError = null;
 
@@ -79,23 +166,7 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
             try
             {
                 var downloader = new MyParser.Services.Downloader(http, _progressLogger);
-                var request = new HttpRangeDownloadRequest(
-                    url,
-                    path,
-                    result.Bvid,
-                    maxBytes,
-                    true,
-                    minParallelBytes,
-                    segmentCount,
-                    (method, range) => CreateMediaRequest(method, url, result, range),
-                    statusCode => new BilibiliParseException($"{label}下载 HTTP {(int)statusCode}"),
-                    bytes => new BilibiliParseException($"{label}文件过大：{bytes / 1024 / 1024}MB > {config.MaxVideoDownloadMegabytes}MB"),
-                    () => new BilibiliParseException($"{label}文件超过限制：{config.MaxVideoDownloadMegabytes}MB"),
-                    (index, statusCode) => new BilibiliParseException($"{label}分片 {index} 不支持 Range：HTTP {(int)statusCode}"),
-                    (index, contentRange) => new BilibiliParseException($"{label}分片 {index} Content-Range 不匹配：{contentRange}"),
-                    (index, copied, expected) => new BilibiliParseException($"{label}分片 {index} 大小不匹配：{copied} != {expected}"),
-                    (total, expected) => new BilibiliParseException($"{label}分片合并大小不一致：{total} != {expected}"),
-                    ex => BotLog.Warning($"MyParser Bilibili {label}并发下载失败，回退普通下载: bvid={result.Bvid}, error={ex.Message}"));
+                var request = CreateDownloadRequest(stream, url, path, result, label, maxBytes);
                 var total = await downloader.DownloadAsync(request, cancellationToken);
                 if (total <= 0)
                 {
@@ -112,6 +183,55 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
         }
 
         throw new BilibiliParseException($"{label}下载失败：{lastError?.Message ?? "无可用地址"}");
+    }
+
+    private HttpRangeDownloadRequest CreateDownloadRequest(BilibiliMediaStream stream, string url, string path, BilibiliParseResult result, string label, long maxBytes)
+    {
+        return new HttpRangeDownloadRequest(
+            url,
+            path,
+            result.Bvid,
+            maxBytes,
+            true,
+            1,
+            Math.Clamp(config.ParallelDownloadThreads, 1, 64),
+            (method, range) => CreateMediaRequest(method, url, result, range),
+            statusCode => new BilibiliParseException($"{label}下载 HTTP {(int)statusCode}"),
+            bytes => new BilibiliParseException($"{label}文件过大：{bytes / 1024 / 1024}MB > {config.MaxVideoDownloadMegabytes}MB"),
+            () => new BilibiliParseException($"{label}文件超过限制：{config.MaxVideoDownloadMegabytes}MB"),
+            (index, statusCode) => new BilibiliParseException($"{label}分片 {index} 不支持 Range：HTTP {(int)statusCode}"),
+            (index, contentRange) => new BilibiliParseException($"{label}分片 {index} Content-Range 不匹配：{contentRange}"),
+            (index, copied, expected) => new BilibiliParseException($"{label}分片 {index} 大小不匹配：{copied} != {expected}"),
+            (total, expected) => new BilibiliParseException($"{label}分片合并大小不一致：{total} != {expected}"),
+            ex => BotLog.Warning($"MyParser Bilibili {label}并发下载失败，回退普通下载: bvid={result.Bvid}, quality={stream.QualityName}, error={ex.Message}"));
+    }
+
+    private long GetMaxBytes()
+    {
+        return config.MaxVideoDownloadMegabytes <= 0
+            ? long.MaxValue
+            : config.MaxVideoDownloadMegabytes * 1024L * 1024L;
+    }
+
+    private static long? EstimateTotalBytes(long? videoBytes, long? audioBytes)
+    {
+        return videoBytes is null || audioBytes is null ? null : videoBytes.Value + audioBytes.Value;
+    }
+
+    private static bool IsWithinLimit(long? bytes, long maxBytes)
+    {
+        return maxBytes == long.MaxValue || bytes is null || bytes <= maxBytes;
+    }
+
+    private static void ThrowTooLarge(StreamProbe video, StreamProbe audio, long? estimated, long maxBytes)
+    {
+        var limitText = maxBytes == long.MaxValue ? "无限制" : FormatSize(maxBytes);
+        throw new BilibiliParseException($"视频文件过大：视频流={FormatSize(video.EstimatedBytes)}, 音频流={FormatSize(audio.EstimatedBytes)}, 预估合计={FormatSize(estimated)}, 限制={limitText}");
+    }
+
+    private static string FormatSize(long? bytes)
+    {
+        return bytes is null ? "未知" : $"{bytes.Value / 1024d / 1024d:F2}MB";
     }
 
     private HttpRequestMessage CreateMediaRequest(HttpMethod method, string url, BilibiliParseResult result, string? range)
@@ -303,4 +423,6 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
             // ignore cleanup errors
         }
     }
+
+    private sealed record StreamProbe(BilibiliMediaStream Stream, string Url, long? EstimatedBytes);
 }

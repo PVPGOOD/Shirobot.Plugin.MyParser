@@ -9,6 +9,7 @@ using System.Text;
 using Shirobot.Plugin.MyParser.Parsing;
 using Shirobot.Plugin.MyParser.Providers.Common.MessageHandling;
 using Shirobot.Plugin.MyParser.Providers.Bilibili.Utilities;
+using Shirobot.Plugin.MyParser.Utility;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Core;
@@ -279,6 +280,7 @@ public sealed class MyParserPlugin : PluginBase
         Directory.CreateDirectory(MyParserRuntime.DownloadDirectory);
         Directory.CreateDirectory(MyParserRuntime.BilibiliDownloadDirectory);
         Directory.CreateDirectory(MyParserRuntime.XiaohongshuDownloadDirectory);
+        LocalMediaCleanup.CleanupStartupResidues(_config);
     }
 
     private string ResolveCookiePath(string fileName)

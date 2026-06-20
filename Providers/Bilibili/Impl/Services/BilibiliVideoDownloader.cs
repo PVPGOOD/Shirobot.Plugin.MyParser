@@ -20,7 +20,9 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
         }
 
         var cacheKey = $"bilibili:{result.Bvid}:p{result.Page}:cid{result.Cid}:v{video.Stream.QualityId}:{video.Stream.CodecName}:a{audio.Stream.StreamId}";
-        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, () => DownloadAndMuxCoreAsync(result, video.Stream, audio.Stream, cancellationToken));
+        var selectedVideo = video.Stream with { Url = video.Url, BackupUrls = [] };
+        var selectedAudio = audio.Stream with { Url = audio.Url, BackupUrls = [] };
+        var downloaded = await MyParserRuntime.GetOrAddVideoDownloadAsync(cacheKey, () => DownloadAndMuxCoreAsync(result, selectedVideo, selectedAudio, cancellationToken));
         result.LocalVideoPath = downloaded.LocalPath;
         result.LocalVideoFileUri = downloaded.FileUri;
         return downloaded;
@@ -31,45 +33,55 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
         var videos = result.VideoStreams.Count > 0 ? result.VideoStreams : [result.SelectedVideo ?? throw new BilibiliParseException("没有可下载的视频流。")];
         var audios = result.AudioStreams.Count > 0 ? result.AudioStreams : [result.SelectedAudio ?? throw new BilibiliParseException("没有可下载的音频流。")];
         var maxBytes = GetMaxBytes();
-        var videoProbes = new List<StreamProbe>();
-        var audioProbes = new List<StreamProbe>();
-
-        foreach (var video in videos)
+        StreamProbe? firstVideoProbe = null;
+        var audioProbe = await SelectAudioProbeAsync(audios, result, maxBytes, cancellationToken);
+        foreach (var video in config.AutoFallbackQualityBySize ? videos : videos.Take(1))
         {
-            videoProbes.Add(await ProbeStreamAsync(video, result, "视频流", cancellationToken));
-        }
-
-        foreach (var audio in audios)
-        {
-            audioProbes.Add(await ProbeStreamAsync(audio, result, "音频流", cancellationToken));
-        }
-
-        foreach (var video in videoProbes)
-        {
-            foreach (var audio in audioProbes)
+            var videoProbe = await ProbeStreamAsync(video, result, "视频流", cancellationToken);
+            firstVideoProbe ??= videoProbe;
+            var estimated = EstimateTotalBytes(videoProbe.EstimatedBytes, audioProbe.EstimatedBytes);
+            if (IsWithinLimit(videoProbe.EstimatedBytes, maxBytes)
+                && IsWithinLimit(audioProbe.EstimatedBytes, maxBytes)
+                && IsWithinLimit(estimated, maxBytes))
             {
-                var estimated = EstimateTotalBytes(video.EstimatedBytes, audio.EstimatedBytes);
-                if (IsWithinLimit(video.EstimatedBytes, maxBytes)
-                    && IsWithinLimit(audio.EstimatedBytes, maxBytes)
-                    && IsWithinLimit(estimated, maxBytes))
+                if (!ReferenceEquals(videoProbe.Stream, result.SelectedVideo) || !ReferenceEquals(audioProbe.Stream, result.SelectedAudio))
                 {
-                    if (!ReferenceEquals(video.Stream, result.SelectedVideo) || !ReferenceEquals(audio.Stream, result.SelectedAudio))
-                    {
-                        BotLog.Info($"MyParser Bilibili 因文件大小自动降级: bvid={result.Bvid}, quality={video.Stream.QualityName}, fps={video.Stream.Fps}, size={video.Stream.Width}x{video.Stream.Height}, codec={video.Stream.CodecName}, estimated_total={FormatSize(estimated)}");
-                    }
-
-                    return (video, audio, estimated);
+                    BotLog.Info($"MyParser Bilibili 因文件大小自动降级: bvid={result.Bvid}, quality={videoProbe.Stream.QualityName}, fps={videoProbe.Stream.Fps}, size={videoProbe.Stream.Width}x{videoProbe.Stream.Height}, codec={videoProbe.Stream.CodecName}, estimated_total={FormatSize(estimated)}");
                 }
 
-                if (!config.AutoFallbackQualityBySize)
-                {
-                    ThrowTooLarge(video, audio, estimated, maxBytes);
-                }
+                return (videoProbe, audioProbe, estimated);
+            }
+
+            if (!config.AutoFallbackQualityBySize)
+            {
+                ThrowTooLarge(videoProbe, audioProbe, estimated, maxBytes);
             }
         }
 
-        ThrowTooLarge(videoProbes.First(), audioProbes.First(), EstimateTotalBytes(videoProbes.First().EstimatedBytes, audioProbes.First().EstimatedBytes), maxBytes);
+        var fallbackVideo = firstVideoProbe ?? throw new BilibiliParseException("没有可下载的视频流。");
+        ThrowTooLarge(fallbackVideo, audioProbe, EstimateTotalBytes(fallbackVideo.EstimatedBytes, audioProbe.EstimatedBytes), maxBytes);
         throw new UnreachableException();
+    }
+
+    private async Task<StreamProbe> SelectAudioProbeAsync(IReadOnlyList<BilibiliMediaStream> audios, BilibiliParseResult result, long maxBytes, CancellationToken cancellationToken)
+    {
+        StreamProbe? firstProbe = null;
+        foreach (var audio in config.AutoFallbackQualityBySize ? audios : audios.Take(1))
+        {
+            var probe = await ProbeStreamAsync(audio, result, "音频流", cancellationToken);
+            firstProbe ??= probe;
+            if (IsWithinLimit(probe.EstimatedBytes, maxBytes))
+            {
+                return probe;
+            }
+
+            if (!config.AutoFallbackQualityBySize)
+            {
+                ThrowTooLarge(probe, probe, probe.EstimatedBytes, maxBytes);
+            }
+        }
+
+        return firstProbe ?? throw new BilibiliParseException("没有可下载的音频流。");
     }
 
     private async Task<StreamProbe> ProbeStreamAsync(BilibiliMediaStream stream, BilibiliParseResult result, string label, CancellationToken cancellationToken)
@@ -79,10 +91,16 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
         {
             try
             {
+                using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                probeCts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(config.RequestTimeoutSeconds, 5, 300)));
                 var downloader = new MyParser.Services.Downloader(http, _progressLogger);
                 var request = CreateDownloadRequest(stream, url, string.Empty, result, label, GetMaxBytes());
-                var probe = await downloader.ProbeAsync(request, cancellationToken);
+                var probe = await downloader.ProbeAsync(request, probeCts.Token);
                 return new StreamProbe(stream, url, probe.ContentLength);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                lastError = ex;
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or BilibiliParseException)
             {
@@ -175,10 +193,20 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
 
                 return;
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or BilibiliParseException)
+            catch (IOException ex)
             {
+                CleanupDownloadFiles(path);
+                throw new BilibiliParseException($"{label}下载失败：{ex.Message}");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or BilibiliParseException)
+            {
+                if (IsNonRetriableDownloadError(ex))
+                {
+                    throw;
+                }
+
                 lastError = ex;
-                TryDelete(path);
+                CleanupDownloadFiles(path);
             }
         }
 
@@ -232,6 +260,37 @@ internal sealed class BilibiliVideoDownloader(PluginConfig config, HttpClient ht
     private static string FormatSize(long? bytes)
     {
         return bytes is null ? "未知" : $"{bytes.Value / 1024d / 1024d:F2}MB";
+    }
+
+    private static bool IsNonRetriableDownloadError(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is OutOfMemoryException)
+            {
+                return true;
+            }
+
+            if (current is IOException && current.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (current is BilibiliParseException
+                && (current.Message.Contains("文件过大", StringComparison.OrdinalIgnoreCase)
+                    || current.Message.Contains("文件超过限制", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void CleanupDownloadFiles(string path)
+    {
+        TryDelete(path);
+        TryDelete(path + ".download");
     }
 
     private HttpRequestMessage CreateMediaRequest(HttpMethod method, string url, BilibiliParseResult result, string? range)

@@ -43,3 +43,6 @@ appsettings.Development.local.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local launch profiles
+**/Properties/launchSettings.json

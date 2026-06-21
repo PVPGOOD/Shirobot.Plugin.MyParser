@@ -1,0 +1,110 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+        <!--        在此处配置你的宿主插件目录-->
+        <HostPluginDir>..\ShiroBot\plugins\$(AssemblyName)\</HostPluginDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="ShiroBot.AvaloniaSdk" />
+        <PackageReference Include="ILRepack.Lib.MSBuild.Task">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Net.Codecrete.QrCodeGenerator" />
+        <PackageReference Include="ShiroBot.SDK" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\MyParser.Sharing\MyParser.Sharing.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="..\.github\workflows\release.yml" Link=".github\workflows\release.yml" />
+    </ItemGroup>
+
+    <Target Name="RepackPlugin" AfterTargets="Publish" Condition="'$(Configuration)'=='Release'">
+        <PropertyGroup>
+            <MergedPluginFile>$(PublishDir)$(AssemblyName).merged.dll</MergedPluginFile>
+            <MergedPluginPdb>$(PublishDir)$(AssemblyName).merged.pdb</MergedPluginPdb>
+            <PublishedPluginFile>$(PublishDir)$(AssemblyName).dll</PublishedPluginFile>
+            <PublishedPluginPdb>$(PublishDir)$(AssemblyName).pdb</PublishedPluginPdb>
+        </PropertyGroup>
+
+        <Delete Files="$(MergedPluginFile);$(MergedPluginPdb)" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(PublishedPluginFile)" OverwriteReadOnlyFiles="true" />
+        <Copy SourceFiles="$(TargetDir)$(AssemblyName).pdb" DestinationFiles="$(PublishedPluginPdb)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
+
+        <ItemGroup>
+            <RepackInput Include="$(PublishedPluginFile)" />
+            <ProviderOutput Include="$(PublishDir)myparser-provider-*.dll;$(PublishDir)myparser-provider-*.pdb;$(PublishDir)myparser-sharing.dll;$(PublishDir)myparser-sharing.pdb" />
+            <RepackDependency Include="$(PublishDir)*.dll"
+                              Exclude="$(PublishedPluginFile);
+                                        $(MergedPluginFile);
+                                        @(ProviderOutput);
+                                        $(PublishDir)Avalonia*.dll;
+                                        $(PublishDir)HarfBuzzSharp.dll;
+                                        $(PublishDir)MicroCom.Runtime.dll;
+                                        $(PublishDir)SkiaSharp.dll;
+                                        $(PublishDir)ShiroBot.AvaloniaSdk.dll;
+                                        $(PublishDir)ShiroBot.SDK.dll;
+                                        $(PublishDir)ShiroBot.Model.dll;
+                                        $(PublishDir)System*.dll;
+                                       $(PublishDir)mscorlib.dll;
+                                       $(PublishDir)netstandard.dll" />
+            <RepackInput Include="@(RepackDependency)" />
+        </ItemGroup>
+
+        <ILRepack
+                TargetKind="Dll"
+                OutputFile="$(MergedPluginFile)"
+                InputAssemblies="@(RepackInput)"
+                LibraryPath="$(PublishDir);$(TargetDir);@(ReferencePath->'%(RootDir)%(Directory)')"
+                Internalize="false"
+                Parallel="true"
+                DebugInfo="true" />
+
+        <Copy SourceFiles="$(MergedPluginFile)" DestinationFiles="$(PublishDir)$(AssemblyName).dll" OverwriteReadOnlyFiles="true" />
+        <Copy SourceFiles="$(MergedPluginPdb)" DestinationFiles="$(PublishedPluginPdb)" OverwriteReadOnlyFiles="true" Condition="Exists('$(MergedPluginPdb)')" />
+        <Delete Files="$(MergedPluginFile)" />
+        <Delete Files="$(MergedPluginPdb)" />
+        <Delete Files="@(RepackDependency)" />
+
+        <ItemGroup>
+            <PublishHostProvidedOutput Include="$(PublishDir)Avalonia*.dll;$(PublishDir)Avalonia*.pdb;$(PublishDir)HarfBuzzSharp.dll;$(PublishDir)HarfBuzzSharp.pdb;$(PublishDir)MicroCom.Runtime.dll;$(PublishDir)MicroCom.Runtime.pdb;$(PublishDir)SkiaSharp.dll;$(PublishDir)SkiaSharp.pdb;$(PublishDir)ShiroBot.AvaloniaSdk.dll;$(PublishDir)ShiroBot.AvaloniaSdk.pdb;$(PublishDir)ShiroBot.SDK.dll;$(PublishDir)ShiroBot.SDK.pdb;$(PublishDir)ShiroBot.Model.dll;$(PublishDir)ShiroBot.Model.pdb" />
+        </ItemGroup>
+
+        <Delete Files="@(PublishHostProvidedOutput)" />
+        <RemoveDir Directories="$(PublishDir)runtimes" />
+    </Target>
+
+    <Target Name="CopyPluginToHost"
+            AfterTargets="Build"
+            Condition="'$(CopyPluginToHost)' != 'false' And '$(Configuration)'=='Debug'">
+        <MakeDir Directories="$(HostPluginDir)" />
+
+        <ItemGroup>
+            <PluginDebugOutput Include="$(TargetDir)**\*"
+                               Exclude="$(TargetDir)myparser-provider-*.dll;$(TargetDir)myparser-provider-*.pdb;$(TargetDir)Avalonia*.dll;$(TargetDir)Avalonia*.pdb;$(TargetDir)HarfBuzzSharp.dll;$(TargetDir)HarfBuzzSharp.pdb;$(TargetDir)MicroCom.Runtime.dll;$(TargetDir)MicroCom.Runtime.pdb;$(TargetDir)SkiaSharp.dll;$(TargetDir)SkiaSharp.pdb;$(TargetDir)runtimes\**\*;$(TargetDir)$(AssemblyName).exe;$(TargetDir)$(AssemblyName).runtimeconfig.json;$(TargetDir)ShiroBot.AvaloniaSdk.dll;$(TargetDir)ShiroBot.AvaloniaSdk.pdb;$(TargetDir)ShiroBot.SDK.dll;$(TargetDir)ShiroBot.SDK.pdb;$(TargetDir)ShiroBot.Model.dll;$(TargetDir)ShiroBot.Model.pdb" />
+            <ProviderDebugOutput Include="$(TargetDir)myparser-provider-*.dll;$(TargetDir)myparser-provider-*.pdb" />
+            <PluginPreviewOnlyOutput Include="$(HostPluginDir)Avalonia*.dll;$(HostPluginDir)Avalonia*.pdb;$(HostPluginDir)HarfBuzzSharp.dll;$(HostPluginDir)HarfBuzzSharp.pdb;$(HostPluginDir)MicroCom.Runtime.dll;$(HostPluginDir)MicroCom.Runtime.pdb;$(HostPluginDir)SkiaSharp.dll;$(HostPluginDir)SkiaSharp.pdb;$(HostPluginDir)$(AssemblyName).exe;$(HostPluginDir)$(AssemblyName).runtimeconfig.json;$(HostPluginDir)runtimes\**\*" />
+        </ItemGroup>
+
+        <Delete Files="@(PluginPreviewOnlyOutput)" />
+        <RemoveDir Directories="$(HostPluginDir)runtimes" />
+
+        <Copy SourceFiles="@(PluginDebugOutput)"
+              DestinationFiles="@(PluginDebugOutput->'$(HostPluginDir)%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
+
+        <MakeDir Directories="$(HostPluginDir)provider\" />
+        <Copy SourceFiles="@(ProviderDebugOutput)"
+              DestinationFiles="@(ProviderDebugOutput->'$(HostPluginDir)provider\%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
+    </Target>
+
+</Project>

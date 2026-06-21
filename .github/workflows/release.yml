@@ -14,13 +14,14 @@ on:
 permissions:
   contents: write
 
-env:
-  PROJECT_DIR: .
-  PUBLISH_DIR: bin/Release/net10.0/publish
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    name: Build and publish release package
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -31,25 +32,61 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Publish
-        run: dotnet publish "$PROJECT_DIR" --configuration Release
+      - name: Restore
+        run: dotnet restore MyParser.sln
 
-      - name: Collect Plugin DLL
-        shell: bash
+      - name: Build
+        run: dotnet build MyParser.sln --configuration Release --no-restore -p:CopyPluginToHost=false -p:BuildMyParserProvidersOnMainPluginBuild=false -v:minimal
+
+      - name: Collect release package
+        shell: pwsh
         run: |
-          PROJECT="$(basename "$(ls *.csproj | head -1)" .csproj)"
-          PLUGIN_DLL="$PUBLISH_DIR/${PROJECT}.dll"
-          if [ ! -f "$PLUGIN_DLL" ]; then
-            echo "Plugin DLL not found: $PLUGIN_DLL"
-            ls -la "$PUBLISH_DIR"
-            exit 1
-          fi
-          mkdir -p release
-          cp "$PLUGIN_DLL" release/
+          $ErrorActionPreference = "Stop"
+          $packageRoot = Join-Path $PWD "release/Shirobot.Plugin.MyParser"
+          $providerRoot = Join-Path $packageRoot "provider"
+          New-Item -ItemType Directory -Force -Path $providerRoot | Out-Null
 
-      - name: Upload DLL to Release
+          $mainOut = Join-Path $PWD "MyParser/bin/Release/net10.0"
+          $providerOuts = @(
+            (Join-Path $PWD "MyParser.Provider.BiliBili/bin/Release/net10.0"),
+            (Join-Path $PWD "MyParser.Provider.Douyin/bin/Release/net10.0"),
+            (Join-Path $PWD "MyParser.Provider.Xiaohongshu/bin/Release/net10.0")
+          )
+
+          $mainFiles = @(
+            "Shirobot.Plugin.MyParser.dll",
+            "myparser-sharing.dll",
+            "QrCodeGenerator.dll"
+          )
+
+          foreach ($file in $mainFiles) {
+            $source = Join-Path $mainOut $file
+            if (-not (Test-Path $source)) {
+              throw "Missing release file: $source"
+            }
+            Copy-Item $source $packageRoot -Force
+          }
+
+          foreach ($out in $providerOuts) {
+            Get-ChildItem $out -Filter "myparser-provider-*.dll" -File | Copy-Item -Destination $providerRoot -Force
+          }
+
+          $providerCount = (Get-ChildItem $providerRoot -Filter "myparser-provider-*.dll" -File).Count
+          if ($providerCount -ne 3) {
+            throw "Expected 3 provider dlls, found $providerCount"
+          }
+
+          New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot "cookies") | Out-Null
+          foreach ($cookie in @("bilibili.txt", "douyin.txt", "xiaohongshu.txt")) {
+            New-Item -ItemType File -Force -Path (Join-Path $packageRoot "cookies/$cookie") | Out-Null
+          }
+
+          Compress-Archive -Path $packageRoot -DestinationPath "release/Shirobot.Plugin.MyParser.zip" -Force
+          Get-ChildItem release -Recurse -File | Select-Object FullName, Length
+
+      - name: Upload package to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
           target_commitish: ${{ github.sha }}
-          files: release/*.dll
+          files: release/Shirobot.Plugin.MyParser.zip

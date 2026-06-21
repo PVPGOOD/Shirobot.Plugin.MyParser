@@ -1,0 +1,92 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "Directory.Build.targets"
+      - "Directory.Packages.props"
+      - "MyParser.sln"
+      - "MyParser/**"
+      - "MyParser.Sharing/**"
+      - "MyParser.Provider.BiliBili/**"
+      - "MyParser.Provider.Douyin/**"
+      - "MyParser.Provider.Xiaohongshu/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "Directory.Build.targets"
+      - "Directory.Packages.props"
+      - "MyParser.sln"
+      - "MyParser/**"
+      - "MyParser.Sharing/**"
+      - "MyParser.Provider.BiliBili/**"
+      - "MyParser.Provider.Douyin/**"
+      - "MyParser.Provider.Xiaohongshu/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build MyParser plugin and providers
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore MyParser.sln
+
+      - name: Build solution
+        run: dotnet build MyParser.sln --configuration Release --no-restore -p:CopyPluginToHost=false -p:BuildMyParserProvidersOnMainPluginBuild=false -v:minimal
+
+      - name: Check provider outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @(
+            "MyParser/bin/Release/net10.0/Shirobot.Plugin.MyParser.dll",
+            "MyParser/bin/Release/net10.0/myparser-sharing.dll",
+            "MyParser.Provider.BiliBili/bin/Release/net10.0/myparser-provider-bilibili.dll",
+            "MyParser.Provider.Douyin/bin/Release/net10.0/myparser-provider-douyin.dll",
+            "MyParser.Provider.Xiaohongshu/bin/Release/net10.0/myparser-provider-xiaohongshu.dll"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) {
+              throw "Missing expected build output: $path"
+            }
+            Get-Item $path | Select-Object FullName, Length
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: myparser-build
+          if-no-files-found: error
+          path: |
+            MyParser/bin/Release/net10.0/Shirobot.Plugin.MyParser.dll
+            MyParser/bin/Release/net10.0/Shirobot.Plugin.MyParser.pdb
+            MyParser/bin/Release/net10.0/myparser-sharing.dll
+            MyParser/bin/Release/net10.0/myparser-sharing.pdb
+            MyParser/bin/Release/net10.0/QrCodeGenerator.dll
+            MyParser.Provider.BiliBili/bin/Release/net10.0/myparser-provider-bilibili.dll
+            MyParser.Provider.BiliBili/bin/Release/net10.0/myparser-provider-bilibili.pdb
+            MyParser.Provider.Douyin/bin/Release/net10.0/myparser-provider-douyin.dll
+            MyParser.Provider.Douyin/bin/Release/net10.0/myparser-provider-douyin.pdb
+            MyParser.Provider.Xiaohongshu/bin/Release/net10.0/myparser-provider-xiaohongshu.dll
+            MyParser.Provider.Xiaohongshu/bin/Release/net10.0/myparser-provider-xiaohongshu.pdb

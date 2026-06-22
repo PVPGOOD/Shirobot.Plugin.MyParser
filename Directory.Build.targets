@@ -24,6 +24,7 @@
     <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.BiliBili\MyParser.Provider.BiliBili.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.BiliBili\MyParser.Provider.BiliBili.csproj')" />
     <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.Douyin\MyParser.Provider.Douyin.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.Douyin\MyParser.Provider.Douyin.csproj')" />
     <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.Xiaohongshu\MyParser.Provider.Xiaohongshu.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.Xiaohongshu\MyParser.Provider.Xiaohongshu.csproj')" />
+    <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.Heybox\MyParser.Provider.Heybox.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.Heybox\MyParser.Provider.Heybox.csproj')" />
   </ItemGroup>
 
   <Target Name="CopyMyParserProviderToHost"

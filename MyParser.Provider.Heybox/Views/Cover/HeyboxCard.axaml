@@ -1,0 +1,167 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="MyParser.Provider.Heybox.Views.HeyboxCard"
+             x:CompileBindings="False"
+             Width="360" Height="520">
+
+    <UserControl.Styles>
+        <Style Selector="Border.PremiumCard">
+            <Setter Property="BoxShadow" Value="0 8 24 0 #1A000000" />
+        </Style>
+    </UserControl.Styles>
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="CardFallbackBg">#F5F7FA</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextPrimary">#14191E</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextSecondary">#344352</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextMuted">#5D6B78</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBg">#D9FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBorder">#33FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagBg">#1A000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagText">#344352</SolidColorBrush>
+                    <SolidColorBrush x:Key="HeyboxAccent">#008AB8</SolidColorBrush>
+                    <SolidColorBrush x:Key="HeyboxAccentText">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardImageOverlay">#66FFFFFF</SolidColorBrush>
+                    <LinearGradientBrush x:Key="BottomScrim" StartPoint="0%,100%" EndPoint="0%,0%">
+                        <GradientStop Color="#F2F5F7FA" Offset="0" />
+                        <GradientStop Color="#CCF5F7FA" Offset="0.35" />
+                        <GradientStop Color="#00F5F7FA" Offset="1" />
+                    </LinearGradientBrush>
+                </ResourceDictionary>
+
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="CardFallbackBg">#101820</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextPrimary">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextSecondary">#E8EEF4</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTextMuted">#C4D0DA</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBg">#40000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardPanelBorder">#1AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagBg">#2BFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardTagText">#E8EEF4</SolidColorBrush>
+                    <SolidColorBrush x:Key="HeyboxAccent">#00C2EE</SolidColorBrush>
+                    <SolidColorBrush x:Key="HeyboxAccentText">#052B36</SolidColorBrush>
+                    <SolidColorBrush x:Key="CardImageOverlay">#66000000</SolidColorBrush>
+                    <LinearGradientBrush x:Key="BottomScrim" StartPoint="0%,100%" EndPoint="0%,0%">
+                        <GradientStop Color="#F2101820" Offset="0" />
+                        <GradientStop Color="#B3101820" Offset="0.45" />
+                        <GradientStop Color="#00101820" Offset="1" />
+                    </LinearGradientBrush>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Border Classes="PremiumCard"
+            Width="360" Height="520"
+            CornerRadius="12"
+            ClipToBounds="True"
+            Background="{DynamicResource CardFallbackBg}">
+        <Grid>
+            <!-- 参考 Bilibili 卡片：封面毛玻璃铺底，弱化纯色块。 -->
+            <Border Margin="-44">
+                <Border.Effect>
+                    <BlurEffect Radius="28" />
+                </Border.Effect>
+                <Border.Background>
+                    <ImageBrush Source="{Binding Cover}" Stretch="UniformToFill" />
+                </Border.Background>
+            </Border>
+            <Border Background="{DynamicResource CardImageOverlay}" />
+            <Border VerticalAlignment="Bottom" Height="360" IsHitTestVisible="False" Background="{DynamicResource BottomScrim}" />
+
+            <!-- 顶部平台与 link id，参考视频卡片的悬浮 pill。 -->
+            <Grid VerticalAlignment="Top" Margin="18,18,18,0" ColumnDefinitions="*,Auto">
+                <Border Background="{DynamicResource HeyboxAccent}"
+                        CornerRadius="8"
+                        Padding="10,5"
+                        HorizontalAlignment="Left">
+                    <TextBlock Text="小黑盒 / Heybox"
+                               Foreground="{DynamicResource HeyboxAccentText}"
+                               FontSize="12"
+                               FontWeight="Black"
+                               LetterSpacing="0.4" />
+                </Border>
+
+                <Border Grid.Column="1"
+                        Background="{DynamicResource CardPanelBg}"
+                        BorderBrush="{DynamicResource CardPanelBorder}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="8,5">
+                    <TextBlock Text="{Binding LinkId}"
+                               Foreground="{DynamicResource CardTextSecondary}"
+                               FontSize="11"
+                               FontWeight="SemiBold" />
+                </Border>
+            </Grid>
+
+            <!-- 中部封面缩略图：保留文章封面识别度，样式参考 Bili 图片卡片。 -->
+            <Border Width="132" Height="132"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,68,0,0"
+                    CornerRadius="16"
+                    ClipToBounds="True"
+                    Background="{DynamicResource CardPanelBg}"
+                    BorderBrush="{DynamicResource CardPanelBorder}"
+                    BorderThickness="1">
+                <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+            </Border>
+
+            <StackPanel VerticalAlignment="Bottom" Margin="20,0,20,22" Spacing="14">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Title}"
+                               Foreground="{DynamicResource CardTextPrimary}"
+                               FontSize="19"
+                               FontWeight="Heavy"
+                               TextWrapping="Wrap"
+                               LineHeight="25"
+                               MaxLines="3" />
+
+                    <TextBlock Text="{Binding AuthorName}"
+                               Foreground="{DynamicResource CardTextMuted}"
+                               FontSize="12"
+                               FontWeight="Medium" />
+
+                    <TextBlock Text="{Binding Description}"
+                               Foreground="{DynamicResource CardTextSecondary}"
+                               FontSize="13"
+                               TextWrapping="Wrap"
+                               LineHeight="20"
+                               MaxLines="4" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border Background="{DynamicResource CardTagBg}" CornerRadius="7" Padding="8,4">
+                        <TextBlock Text="{Binding MediaText}"
+                                   Foreground="{DynamicResource CardTagText}"
+                                   FontSize="11"
+                                   FontWeight="Medium" />
+                    </Border>
+                    <Border Background="{DynamicResource CardTagBg}" CornerRadius="7" Padding="8,4">
+                        <TextBlock Text="{Binding SourceText}"
+                                   Foreground="{DynamicResource CardTagText}"
+                                   FontSize="11"
+                                   FontWeight="Medium" />
+                    </Border>
+                </StackPanel>
+
+                <Border Background="{DynamicResource CardPanelBg}"
+                        BorderBrush="{DynamicResource CardPanelBorder}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12,10">
+                    <TextBlock Text="{Binding StatsText}"
+                               Foreground="{DynamicResource CardTextSecondary}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               LineHeight="18" />
+                </Border>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

@@ -4,12 +4,13 @@ using MyParser.Provider.BiliBili.Utilities;
 
 namespace MyParser.Provider.BiliBili.Parsing;
 
-public sealed class BilibiliLiveParseProvider(BilibiliLiveParser parser) : IParseProvider
+public sealed class BilibiliLiveParseProvider(BilibiliLiveParser parser) : IParseProvider, IProviderPriority
 {
     public BilibiliLiveParser Parser { get; } = parser;
 
     public string Id => "bilibili-live";
     public string Name => "Bilibili 直播";
+    public int Priority => 40;
 
     public bool CanHandle(string text)
     {

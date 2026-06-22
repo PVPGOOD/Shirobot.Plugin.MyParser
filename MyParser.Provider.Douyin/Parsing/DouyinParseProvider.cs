@@ -3,13 +3,14 @@ using Shirobot.Plugin.MyParser.Parsing;
 using MyParser.Provider.Douyin.Parsing;
 namespace MyParser.Provider.Douyin.Parsing;
 
-public sealed class DouyinParseProvider(DouyinParser parser) : IParseProviderWithParser, IProviderLoginStatusProvider, IDisposable
+public sealed class DouyinParseProvider(DouyinParser parser) : IParseProviderWithParser, IProviderLoginStatusProvider, IProviderPriority, IDisposable
 {
     public DouyinParser Parser { get; } = parser;
     public object ParserObject => Parser;
 
     public string Id => "douyin";
     public string Name => "抖音";
+    public int Priority => 10;
 
     public bool CanHandle(string text) => DouyinParser.ContainsDouyinUrl(text);
 

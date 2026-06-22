@@ -5,12 +5,13 @@ using MyParser.Provider.BiliBili.Utilities;
 
 namespace MyParser.Provider.BiliBili.Parsing;
 
-public sealed class BilibiliBangumiParseProvider(BilibiliBangumiParser parser) : IParseProvider
+public sealed class BilibiliBangumiParseProvider(BilibiliBangumiParser parser) : IParseProvider, IProviderPriority
 {
     public BilibiliBangumiParser Parser { get; } = parser;
 
     public string Id => "bilibili-bangumi";
     public string Name => "Bilibili 番剧";
+    public int Priority => 30;
 
     public bool CanHandle(string text)
     {

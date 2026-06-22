@@ -231,12 +231,15 @@ internal sealed partial class BilibiliMessageHandler(
 
     private async Task<VideoOutgoingSegment> BuildVideoSegmentAsync(BilibiliParseResult result)
     {
-        if (((IParseProviderWithParser)bilibiliProvider).ParserObject is IVideoDownloadGate gate)
+        var videoProvider = string.IsNullOrWhiteSpace(result.SourceUrl)
+            ? null
+            : providerRegistry.FindProvider(result.SourceUrl) as IParseProviderWithParser;
+        var parserObject = videoProvider?.ParserObject;
+        if (parserObject is IVideoDownloadGate gate)
         {
             gate.EnsureVideoDownloadAllowed();
         }
 
-        var parser = (IParserHttpClientAccessor)((IParseProviderWithParser)bilibiliProvider).ParserObject;
         var downloader = new BilibiliVideoDownloader(config, _hostServices);
         var (fileUri, localPath) = await downloader.DownloadAndMuxAsync(result);
         result.LocalVideoFileUri = fileUri;

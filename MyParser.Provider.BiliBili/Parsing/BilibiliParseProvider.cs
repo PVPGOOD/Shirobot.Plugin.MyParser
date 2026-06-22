@@ -5,13 +5,14 @@ using ShiroBot.Model.Common;
 
 namespace MyParser.Provider.BiliBili.Parsing;
 
-public sealed class BilibiliParseProvider(BilibiliParser parser) : IIncomingMessageParseProvider, IParseProviderWithParser, IProviderLoginStatusProvider, IQrLoginProvider, IDisposable
+public sealed class BilibiliParseProvider(BilibiliParser parser) : IIncomingMessageParseProvider, IParseProviderWithParser, IProviderLoginStatusProvider, IQrLoginProvider, IProviderPriority, IDisposable
 {
     public BilibiliParser Parser { get; } = parser;
     public object ParserObject => Parser;
 
     public string Id => "bilibili";
     public string Name => "Bilibili";
+    public int Priority => 50;
 
     public bool CanHandle(string text)
     {

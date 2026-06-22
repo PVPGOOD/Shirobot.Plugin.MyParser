@@ -5,10 +5,11 @@ using ShiroBot.Model.Common;
 
 namespace MyParser.Provider.Xiaohongshu.Parsing;
 
-public sealed class XiaohongshuParseProvider(XiaohongshuParser parser) : IIncomingMessageParseProvider, IParseProviderWithParser, IProviderLoginStatusProvider, IQrLoginProvider, IDisposable
+public sealed class XiaohongshuParseProvider(XiaohongshuParser parser) : IIncomingMessageParseProvider, IParseProviderWithParser, IProviderLoginStatusProvider, IQrLoginProvider, IProviderPriority, IDisposable
 {
     public string Id => "xiaohongshu";
     public string Name => "小红书";
+    public int Priority => 0;
     public XiaohongshuParser Parser { get; } = parser;
     public object ParserObject => Parser;
 

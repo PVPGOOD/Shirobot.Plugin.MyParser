@@ -46,6 +46,41 @@ public interface ICookieValidator
     bool LooksLikeCookie(string cookie);
 }
 
+public interface IProviderCookieStore
+{
+    IReadOnlyList<ProviderCookieDescriptor> CookieDescriptors { get; }
+}
+
+public interface IProviderAutoParsePolicy
+{
+    bool IsAutoParseEnabled(PluginConfig config);
+}
+
+public interface IProviderResultMessageClassifier
+{
+    bool IsPluginResultMessage(string text);
+}
+
+public interface IProviderCommandContributor
+{
+    IReadOnlyList<ProviderCommandDescriptor> CreateCommands(ProviderCommandContext context);
+}
+
+public interface IProviderPriority
+{
+    int Priority { get; }
+}
+
+public sealed record ProviderCookieDescriptor(
+    string ProviderId,
+    string DisplayName,
+    string FileName,
+    Action<string> ApplyCookie,
+    Func<string, bool>? ValidateCookie = null,
+    bool CreateIfMissing = true,
+    string? EmptyHint = null,
+    string? InvalidHint = null);
+
 public interface IMyParserProviderModule
 {
     string Id { get; }

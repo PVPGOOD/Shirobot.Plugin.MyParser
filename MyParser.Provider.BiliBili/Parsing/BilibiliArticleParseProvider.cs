@@ -2,12 +2,13 @@ using Shirobot.Plugin.MyParser.Parsing;
 
 namespace MyParser.Provider.BiliBili.Parsing;
 
-public sealed class BilibiliArticleParseProvider(BilibiliParser parser) : IParseProvider
+public sealed class BilibiliArticleParseProvider(BilibiliParser parser) : IParseProvider, IProviderPriority
 {
     public BilibiliParser Parser { get; } = parser;
 
     public string Id => "bilibili-article";
     public string Name => "Bilibili 专栏";
+    public int Priority => 20;
 
     public bool CanHandle(string text)
     {

@@ -28,14 +28,6 @@ public sealed class MyParserPlugin : PluginBase
     private static AssemblyLoadContext? providerAssemblyLoadContext;
 
     private const string CookieDirectoryName = "cookies";
-    private const string DouyinCookieFileName = "douyin.txt";
-    private const string BilibiliCookieFileName = "bilibili.txt";
-    private const string XiaohongshuCookieFileName = "xiaohongshu.txt";
-    private const string BilibiliLoginCommand = "#bili-login";
-    private const string XiaohongshuLoginCommand = "#xhs-login";
-    private const string DouyinCookieCheckCommand = "#douyin-cookie-check";
-    private const string BilibiliCookieCheckCommand = "#bili-cookie-check";
-    private const string XiaohongshuCookieCheckCommand = "#xhs-cookie-check";
 
     private readonly Lock _reloadLock = new();
     private PluginConfig _config = new();
@@ -45,17 +37,19 @@ public sealed class MyParserPlugin : PluginBase
     private CancellationTokenSource? _cookieReloadDebounce;
     private readonly List<IParseProvider> _providers = [];
     private readonly List<IDisposable> _providerDisposables = [];
-    private IParseProvider? _douyinProvider;
-    private IParseProvider? _bilibiliProvider;
-    private IParseProvider? _xiaohongshuProvider;
-    private IIncomingProviderTextNormalizer? _bilibiliTextNormalizer;
-    private ICookieValidator? _douyinCookieValidator;
-    private ICookieValidator? _bilibiliCookieValidator;
+    private readonly List<ProviderCookieDescriptor> _providerCookieDescriptors = [];
+    private readonly List<IProviderTextNormalizer> _providerTextNormalizers = [];
+    private readonly List<IIncomingProviderTextNormalizer> _incomingProviderTextNormalizers = [];
+    private readonly List<IProviderAutoParsePolicy> _providerAutoParsePolicies = [];
+    private readonly List<IProviderResultMessageClassifier> _providerResultMessageClassifiers = [];
+    private readonly List<IProviderReplyParseTextBuilder> _providerReplyParseTextBuilders = [];
+    private readonly List<IProviderCommandContributor> _providerCommandContributors = [];
+    private readonly Dictionary<string, string> _providerModuleIds = new(StringComparer.OrdinalIgnoreCase);
     private ParseProviderRegistry? _providerRegistry;
     private ProviderHostServices? _hostServices;
-    private IProviderMessageHandler? _douyinMessageHandler;
-    private IProviderMessageHandler? _bilibiliMessageHandler;
-    private IProviderMessageHandler? _xiaohongshuMessageHandler;
+    private readonly Dictionary<string, IProviderMessageHandler> _providerMessageHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<IProviderRuntimeModule> _providerRuntimeModules = [];
+    private readonly List<ProviderCommandDescriptor> _providerCommandDescriptors = [];
 
     public override string Name => "MyParser";
 
@@ -66,18 +60,15 @@ public sealed class MyParserPlugin : PluginBase
         _config = Context.Config.Load<PluginConfig>();
         _hostServices = new ProviderHostServices(Context);
         var modules = DiscoverProviderModules(GetPluginDirectory());
-        _bilibiliTextNormalizer = modules.OfType<IIncomingProviderTextNormalizer>().FirstOrDefault(i => string.Equals(((IMyParserProviderModule)i).Id, "bilibili", StringComparison.OrdinalIgnoreCase));
-        _douyinCookieValidator = modules.OfType<ICookieValidator>().FirstOrDefault(i => string.Equals(((IMyParserProviderModule)i).Id, "douyin", StringComparison.OrdinalIgnoreCase));
-        _bilibiliCookieValidator = modules.OfType<ICookieValidator>().FirstOrDefault(i => string.Equals(((IMyParserProviderModule)i).Id, "bilibili", StringComparison.OrdinalIgnoreCase));
+        RegisterProviderModuleCapabilities(modules);
         NormalizeRuntimeDirectories();
-        LoadDouyinCookieFromPluginDirectory();
-        LoadBilibiliCookieFromPluginDirectory();
-        LoadXiaohongshuCookieFromPluginDirectory();
+        LoadProviderCookiesFromPluginDirectory();
 
         foreach (var module in modules)
         {
             foreach (var provider in module.CreateProviders(_config))
             {
+                _providerModuleIds[provider.Id] = module.Id;
                 _providers.Add(provider);
                 if (provider is IDisposable disposable)
                 {
@@ -86,20 +77,22 @@ public sealed class MyParserPlugin : PluginBase
             }
         }
 
-        var orderedProviders = _providers.OrderBy(GetProviderOrder).ToArray();
-        _douyinProvider = orderedProviders.FirstOrDefault(i => string.Equals(i.Id, "douyin", StringComparison.OrdinalIgnoreCase));
-        _bilibiliProvider = orderedProviders.FirstOrDefault(i => string.Equals(i.Id, "bilibili", StringComparison.OrdinalIgnoreCase));
-        _xiaohongshuProvider = orderedProviders.FirstOrDefault(i => string.Equals(i.Id, "xiaohongshu", StringComparison.OrdinalIgnoreCase));
+        var orderedProviders = _providers
+            .OrderBy(GetProviderOrder)
+            .ThenBy(provider => provider.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        foreach (var runtimeModule in modules.OfType<IProviderRuntimeModule>())
+        {
+            _providerRuntimeModules.Add(runtimeModule);
+            runtimeModule.LoadRuntime(new ProviderRuntimeContext(Context, _config, _hostServices));
+        }
+
         _providerRegistry = new ParseProviderRegistry(orderedProviders);
-        _douyinMessageHandler = CreateProviderMessageHandler(modules, _douyinProvider);
-        _bilibiliMessageHandler = CreateProviderMessageHandler(modules, _bilibiliProvider);
-        _xiaohongshuMessageHandler = CreateProviderMessageHandler(modules, _xiaohongshuProvider);
+        CreateProviderMessageHandlers(modules, orderedProviders);
 
         LogLoadedProviderCapabilities(modules, orderedProviders);
 
-        await LogDouyinCookieLoginStatusAsync();
-        await LogBilibiliCookieLoginStatusAsync();
-        await LogXiaohongshuCookieLoginStatusAsync();
+        await LogProviderCookieLoginStatusesAsync(orderedProviders);
 
         // GroupCommands.MapExact("b", async message =>
         // {
@@ -121,16 +114,7 @@ public sealed class MyParserPlugin : PluginBase
         //
         FriendCommands.MapExact("#parser", HandleHelpAsync);
         GroupCommands.MapExact("#parser", HandleHelpAsync);
-        FriendCommands.MapExact(BilibiliLoginCommand, HandleBilibiliLoginAsync);
-        GroupCommands.MapExact(BilibiliLoginCommand, HandleBilibiliLoginAsync);
-        FriendCommands.MapExact(XiaohongshuLoginCommand, HandleXiaohongshuLoginAsync);
-        GroupCommands.MapExact(XiaohongshuLoginCommand, HandleXiaohongshuLoginAsync);
-        FriendCommands.MapExact(DouyinCookieCheckCommand, HandleDouyinCookieCheckAsync);
-        GroupCommands.MapExact(DouyinCookieCheckCommand, HandleDouyinCookieCheckAsync);
-        FriendCommands.MapExact(BilibiliCookieCheckCommand, HandleBilibiliCookieCheckAsync);
-        GroupCommands.MapExact(BilibiliCookieCheckCommand, HandleBilibiliCookieCheckAsync);
-        FriendCommands.MapExact(XiaohongshuCookieCheckCommand, HandleXiaohongshuCookieCheckAsync);
-        GroupCommands.MapExact(XiaohongshuCookieCheckCommand, HandleXiaohongshuCookieCheckAsync);
+        RegisterProviderCommands(modules, orderedProviders);
 
         FriendCommands.MapWhen(IsParseCommand, HandleParseCommandAsync);
         GroupCommands.MapWhen(IsParseCommand, HandleParseCommandAsync);
@@ -139,7 +123,7 @@ public sealed class MyParserPlugin : PluginBase
         GroupCommands.MapWhen(ShouldAutoParse, HandleAutoParseAsync);
 
         StartHotReloadWatchers();
-        BotLog.Info($"MyParser 已加载：抖音/Bilibili/小红书 解析启用。命令：#parser / {_config.ParseCommandPrefix} <链接> / {BilibiliLoginCommand} / {XiaohongshuLoginCommand}");
+        BotLog.Info($"MyParser 已加载：provider 自动注册完成。命令：#parser / {_config.ParseCommandPrefix} <链接>");
     }
 
     private static IMyParserProviderModule[] DiscoverProviderModules(string pluginDirectory)
@@ -194,6 +178,56 @@ public sealed class MyParserPlugin : PluginBase
         return modules
             .OrderBy(module => module.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private void RegisterProviderModuleCapabilities(IEnumerable<IMyParserProviderModule> modules)
+    {
+        _providerCookieDescriptors.Clear();
+        _providerModuleIds.Clear();
+        _providerTextNormalizers.Clear();
+        _incomingProviderTextNormalizers.Clear();
+        _providerAutoParsePolicies.Clear();
+        _providerResultMessageClassifiers.Clear();
+        _providerReplyParseTextBuilders.Clear();
+        _providerCommandContributors.Clear();
+
+        foreach (var module in modules)
+        {
+            if (module is IProviderCookieStore cookieStore)
+            {
+                _providerCookieDescriptors.AddRange(cookieStore.CookieDescriptors);
+            }
+
+            if (module is IProviderTextNormalizer textNormalizer)
+            {
+                _providerTextNormalizers.Add(textNormalizer);
+            }
+
+            if (module is IIncomingProviderTextNormalizer incomingNormalizer)
+            {
+                _incomingProviderTextNormalizers.Add(incomingNormalizer);
+            }
+
+            if (module is IProviderAutoParsePolicy autoParsePolicy)
+            {
+                _providerAutoParsePolicies.Add(autoParsePolicy);
+            }
+
+            if (module is IProviderResultMessageClassifier resultClassifier)
+            {
+                _providerResultMessageClassifiers.Add(resultClassifier);
+            }
+
+            if (module is IProviderReplyParseTextBuilder replyParseTextBuilder)
+            {
+                _providerReplyParseTextBuilders.Add(replyParseTextBuilder);
+            }
+
+            if (module is IProviderCommandContributor commandContributor)
+            {
+                _providerCommandContributors.Add(commandContributor);
+            }
+        }
     }
 
     private static AssemblyLoadContext GetProviderAssemblyLoadContext()
@@ -300,7 +334,7 @@ public sealed class MyParserPlugin : PluginBase
     }
 
 
-    private static void LogLoadedProviderCapabilities(IReadOnlyCollection<IMyParserProviderModule> modules, IReadOnlyCollection<IParseProvider> providers)
+    private void LogLoadedProviderCapabilities(IReadOnlyCollection<IMyParserProviderModule> modules, IReadOnlyCollection<IParseProvider> providers)
     {
         if (modules.Count == 0)
         {
@@ -414,47 +448,73 @@ public sealed class MyParserPlugin : PluginBase
         return capabilities;
     }
 
-    private IProviderMessageHandler? CreateProviderMessageHandler(IEnumerable<IMyParserProviderModule> modules, IParseProvider? provider)
+    private void CreateProviderMessageHandlers(IEnumerable<IMyParserProviderModule> modules, IEnumerable<IParseProvider> providers)
     {
-        if (provider is null || _providerRegistry is null)
+        if (_providerRegistry is null || _hostServices is null)
         {
-            return null;
+            return;
         }
 
-        var module = modules
-            .OfType<IProviderMessageHandlerFactory>()
-            .FirstOrDefault(i => string.Equals(((IMyParserProviderModule)i).Id, GetModuleId(provider.Id), StringComparison.OrdinalIgnoreCase));
-        return _hostServices is null
-            ? null
-            : module?.CreateMessageHandler(new ProviderMessageHandlerContext(Context, _config, _providerRegistry, provider, _hostServices));
+        foreach (var provider in providers)
+        {
+            var module = modules
+                .OfType<IProviderMessageHandlerFactory>()
+                .FirstOrDefault(i => string.Equals(((IMyParserProviderModule)i).Id, GetModuleId(provider.Id), StringComparison.OrdinalIgnoreCase));
+            if (module is null)
+            {
+                continue;
+            }
+
+            var handler = module.CreateMessageHandler(new ProviderMessageHandlerContext(Context, _config, _providerRegistry, provider, _hostServices));
+            if (handler is null)
+            {
+                continue;
+            }
+
+            _providerMessageHandlers[provider.Id] = handler;
+        }
     }
 
-    private static string GetModuleId(string providerId)
+    private IProviderMessageHandler? TryGetProviderMessageHandler(string providerId)
     {
-        return providerId.StartsWith("bilibili", StringComparison.OrdinalIgnoreCase)
-            ? "bilibili"
-            : providerId;
+        return _providerMessageHandlers.TryGetValue(providerId, out var handler)
+            ? handler
+            : _providerMessageHandlers.TryGetValue(GetModuleId(providerId), out handler)
+                ? handler
+                : null;
+    }
+
+    private string GetModuleId(string providerId)
+    {
+        if (_providerModuleIds.TryGetValue(providerId, out var moduleId))
+        {
+            return moduleId;
+        }
+
+        foreach (var runtimeModule in _providerRuntimeModules)
+        {
+            if (runtimeModule.ProviderIds.Any(id => string.Equals(id, providerId, StringComparison.OrdinalIgnoreCase)))
+            {
+                return runtimeModule.ProviderIds.FirstOrDefault() ?? providerId;
+            }
+        }
+
+        return providerId;
     }
 
     private static int GetProviderOrder(IParseProvider provider)
     {
-        return provider.Id switch
-        {
-            "xiaohongshu" => 0,
-            "douyin" => 1,
-            "bilibili-article" => 2,
-            "bilibili-bangumi" => 3,
-            "bilibili-live" => 4,
-            "bilibili" => 5,
-            _ => 100,
-        };
+        return provider is IProviderPriority priorityProvider ? priorityProvider.Priority : 100;
     }
 
-    private Task LogDouyinCookieLoginStatusAsync() => LogProviderCookieLoginStatusAsync(_douyinProvider, "Douyin");
-
-    private Task LogBilibiliCookieLoginStatusAsync() => LogProviderCookieLoginStatusAsync(_bilibiliProvider, "Bilibili");
-
-    private Task LogXiaohongshuCookieLoginStatusAsync() => LogProviderCookieLoginStatusAsync(_xiaohongshuProvider, "Xiaohongshu");
+    private async Task LogProviderCookieLoginStatusesAsync(IEnumerable<IParseProvider> providers)
+    {
+        foreach (var provider in providers.OfType<IProviderLoginStatusProvider>())
+        {
+            var parseProvider = (IParseProvider)provider;
+            await LogProviderCookieLoginStatusAsync(parseProvider, parseProvider.Name);
+        }
+    }
 
     private static async Task LogProviderCookieLoginStatusAsync(IParseProvider? provider, string platformName)
     {
@@ -474,90 +534,46 @@ public sealed class MyParserPlugin : PluginBase
         }
     }
 
-    private void LoadDouyinCookieFromPluginDirectory()
+    private void LoadProviderCookiesFromPluginDirectory()
     {
-        var cookiePath = ResolveCookiePath(DouyinCookieFileName);
-
-        if (!File.Exists(cookiePath))
+        foreach (var descriptor in _providerCookieDescriptors)
         {
-            MyParserRuntime.DouyinCookie = string.Empty;
-            File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
-            BotLog.Info($"MyParser 已创建抖音 Cookie 文件：{cookiePath}");
-            return;
+            LoadProviderCookieFromPluginDirectory(descriptor);
         }
-
-        var cookie = File.ReadAllText(cookiePath, Encoding.UTF8).Trim().TrimStart('\ufeff');
-        if (string.IsNullOrWhiteSpace(cookie))
-        {
-            MyParserRuntime.DouyinCookie = string.Empty;
-            BotLog.Info($"MyParser DouyinCookie 为空；可编辑文件后重启：{cookiePath}");
-            return;
-        }
-
-        if (_douyinCookieValidator is not null && !_douyinCookieValidator.LooksLikeCookie(cookie))
-        {
-            MyParserRuntime.DouyinCookie = string.Empty;
-            BotLog.Warning($"MyParser 忽略无效 DouyinCookie 文件：{cookiePath}。请确保文件内容是浏览器 Request Headers 中 Cookie: 后面的完整值。");
-            return;
-        }
-
-        MyParserRuntime.DouyinCookie = cookie;
-        BotLog.Info($"MyParser 已从插件目录读取 DouyinCookie：{cookiePath}");
     }
 
-    private void LoadBilibiliCookieFromPluginDirectory()
+    private void LoadProviderCookieFromPluginDirectory(ProviderCookieDescriptor descriptor)
     {
-        var cookiePath = ResolveCookiePath(BilibiliCookieFileName);
+        var cookiePath = ResolveCookiePath(descriptor.FileName);
 
         if (!File.Exists(cookiePath))
         {
-            MyParserRuntime.BilibiliCookie = string.Empty;
-            File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
-            BotLog.Info($"MyParser 已创建 Bilibili Cookie 文件：{cookiePath}");
+            descriptor.ApplyCookie(string.Empty);
+            if (descriptor.CreateIfMissing)
+            {
+                File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
+                BotLog.Info($"MyParser 已创建 {descriptor.DisplayName} Cookie 文件：{cookiePath}");
+            }
             return;
         }
 
         var cookie = File.ReadAllText(cookiePath, Encoding.UTF8).Trim().TrimStart('\ufeff');
         if (string.IsNullOrWhiteSpace(cookie))
         {
-            MyParserRuntime.BilibiliCookie = string.Empty;
-            BotLog.Info($"MyParser BilibiliCookie 为空；可发送 {BilibiliLoginCommand} 扫码登录，或编辑文件后重启：{cookiePath}");
+            descriptor.ApplyCookie(string.Empty);
+            BotLog.Info($"MyParser {descriptor.DisplayName}Cookie 为空；{descriptor.EmptyHint ?? $"可编辑文件后重启：{cookiePath}"}");
             return;
         }
 
-        if (_bilibiliCookieValidator is not null && !_bilibiliCookieValidator.LooksLikeCookie(cookie))
+        if (descriptor.ValidateCookie is not null && !descriptor.ValidateCookie(cookie))
         {
-            MyParserRuntime.BilibiliCookie = string.Empty;
-            BotLog.Warning($"MyParser 忽略无效 BilibiliCookie 文件：{cookiePath}。请确保文件内容包含 SESSDATA/bili_jct 等 Cookie。");
+            descriptor.ApplyCookie(string.Empty);
+            BotLog.Warning($"MyParser 忽略无效 {descriptor.DisplayName}Cookie 文件：{cookiePath}。{descriptor.InvalidHint ?? "请检查 Cookie 内容。"}");
             return;
         }
 
-        MyParserRuntime.BilibiliCookie = cookie;
-        BotLog.Info($"MyParser 已从插件目录读取 BilibiliCookie：{cookiePath}");
-    }
-
-    private void LoadXiaohongshuCookieFromPluginDirectory()
-    {
-        var cookiePath = ResolveCookiePath(XiaohongshuCookieFileName);
-
-        if (!File.Exists(cookiePath))
-        {
-            MyParserRuntime.XiaohongshuCookie = string.Empty;
-            File.WriteAllText(cookiePath, string.Empty, Encoding.UTF8);
-            BotLog.Info($"MyParser 已创建小红书 Cookie 文件：{cookiePath}");
-            return;
-        }
-
-        var cookie = File.ReadAllText(cookiePath, Encoding.UTF8).Trim().TrimStart('\ufeff');
-        if (string.IsNullOrWhiteSpace(cookie))
-        {
-            MyParserRuntime.XiaohongshuCookie = string.Empty;
-            BotLog.Info($"MyParser XiaohongshuCookie 为空；可发送 {XiaohongshuLoginCommand} 扫码登录，或编辑文件后重启：{cookiePath}");
-            return;
-        }
-
-        MyParserRuntime.XiaohongshuCookie = cookie;
-        BotLog.Info($"MyParser 已从插件目录读取 XiaohongshuCookie：{cookiePath}");
+        descriptor.ApplyCookie(cookie);
+        BotLog.Info($"MyParser 已从插件目录读取 {descriptor.DisplayName}Cookie：{cookiePath}");
     }
 
     private void NormalizeRuntimeDirectories()
@@ -690,9 +706,7 @@ public sealed class MyParserPlugin : PluginBase
 
     private void ReloadCookiesNow()
     {
-        LoadDouyinCookieFromPluginDirectory();
-        LoadBilibiliCookieFromPluginDirectory();
-        LoadXiaohongshuCookieFromPluginDirectory();
+        LoadProviderCookiesFromPluginDirectory();
         BotLog.Info("MyParser Cookie 文件已热重载。 ");
     }
 
@@ -734,12 +748,12 @@ public sealed class MyParserPlugin : PluginBase
         _hostServices?.Dispose();
         _hostServices = null;
 
-        _douyinMessageHandler?.Dispose();
-        _douyinMessageHandler = null;
-        _bilibiliMessageHandler?.Dispose();
-        _bilibiliMessageHandler = null;
-        _xiaohongshuMessageHandler?.Dispose();
-        _xiaohongshuMessageHandler = null;
+        foreach (var handler in _providerMessageHandlers.Values.Distinct())
+        {
+            handler.Dispose();
+        }
+
+        _providerMessageHandlers.Clear();
         foreach (var disposable in _providerDisposables)
         {
             disposable.Dispose();
@@ -747,31 +761,55 @@ public sealed class MyParserPlugin : PluginBase
 
         _providerDisposables.Clear();
         _providers.Clear();
-        _douyinProvider = null;
-        _bilibiliProvider = null;
-        _xiaohongshuProvider = null;
-        _bilibiliTextNormalizer = null;
-        _douyinCookieValidator = null;
-        _bilibiliCookieValidator = null;
         _providerRegistry = null;
+        _providerRuntimeModules.Clear();
+        _providerCommandDescriptors.Clear();
+        _providerCookieDescriptors.Clear();
+        _providerTextNormalizers.Clear();
+        _incomingProviderTextNormalizers.Clear();
+        _providerAutoParsePolicies.Clear();
+        _providerResultMessageClassifiers.Clear();
+        _providerReplyParseTextBuilders.Clear();
+        _providerCommandContributors.Clear();
+        _providerModuleIds.Clear();
         BotLog.Info("MyParser 已卸载。");
         return Task.CompletedTask;
     }
 
     private Task HandleHelpAsync(IncomingMessage message)
     {
-        var help = "MyParser\n"
-                   + "当前支持：抖音视频 / 图集 / LivePhoto、Bilibili 视频/专栏/图文、小红书视频/图文/评论卡片\n\n"
-                   + "用法：\n"
-                   + $"1. {_config.ParseCommandPrefix} <抖音/Bilibili/小红书 分享链接>\n"
-                   + "2. 直接发送抖音/Bilibili/小红书链接可自动解析\n"
-                   + $"3. {BilibiliLoginCommand}：Bilibili 扫码登录并保存 Cookie\n"
-                   + $"4. {XiaohongshuLoginCommand}：小红书扫码登录并保存 Cookie\n"
-                   + $"5. {DouyinCookieCheckCommand} / {BilibiliCookieCheckCommand} / {XiaohongshuCookieCheckCommand}：检查 Cookie 有效性\n\n"
-                   + "Cookie 文件：插件目录/cookies/douyin.txt、cookies/bilibili.txt、cookies/xiaohongshu.txt\n"
-                   + "Bilibili 说明：需要登录态；视频/音频流会分别下载，并用本地 ffmpeg 合并后发送。\n"
-                   + "小红书说明：需要自行搭建 xhshow sign 服务，并在运行时配置 sign URL/token。";
-        return Context.Message.ReplyAsync(message, help);
+        var modules = _providerModuleIds.Values.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var commands = _providerCommandDescriptors.Select(i => i.Command).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var cookies = _providerCookieDescriptors.Select(i => $"cookies/{i.FileName}").Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var runtimeHelp = _providerRuntimeModules
+            .Select(module => module.GetHelpText(_config))
+            .Where(i => !string.IsNullOrWhiteSpace(i))
+            .ToArray();
+        var help = new StringBuilder();
+        help.AppendLine("MyParser");
+        help.AppendLine($"已加载 provider：{(modules.Length == 0 ? "无" : string.Join(" / ", modules))}");
+        help.AppendLine();
+        help.AppendLine("用法：");
+        help.AppendLine($"1. {_config.ParseCommandPrefix} <分享链接>");
+        help.AppendLine("2. 直接发送 provider 支持的链接可自动解析");
+        if (commands.Length > 0)
+        {
+            help.AppendLine($"3. provider 命令：{string.Join(" / ", commands)}");
+        }
+
+        if (cookies.Length > 0)
+        {
+            help.AppendLine();
+            help.AppendLine("Cookie 文件：" + string.Join("、", cookies));
+        }
+
+        foreach (var item in runtimeHelp)
+        {
+            help.AppendLine();
+            help.AppendLine(item);
+        }
+
+        return Context.Message.ReplyAsync(message, help.ToString().TrimEnd());
     }
 
     private bool IsParseCommand(IncomingMessage message)
@@ -783,9 +821,9 @@ public sealed class MyParserPlugin : PluginBase
 
     private bool ShouldAutoParse(IncomingMessage message)
     {
-        if (TryBuildBilibiliPageLinkFromReply(message, out _))
+        if (TryBuildProviderReplyParseText(message, out var replyParseText))
         {
-            return _config.AutoParseBilibiliLinks;
+            return IsAutoParseEnabledForProvider(_providerRegistry?.FindProvider(replyParseText));
         }
 
         var text = GetPlainText(message);
@@ -795,12 +833,8 @@ public sealed class MyParserPlugin : PluginBase
             if (trimmed.StartsWith(_config.ParseCommandPrefix, StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith("#parser", StringComparison.OrdinalIgnoreCase)
                 || IsPluginResultMessage(trimmed)
-                || IsBilibiliPageTemplateLink(trimmed)
-                || trimmed.StartsWith(BilibiliLoginCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(XiaohongshuLoginCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(DouyinCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(BilibiliCookieCheckCommand, StringComparison.OrdinalIgnoreCase)
-                || trimmed.StartsWith(XiaohongshuCookieCheckCommand, StringComparison.OrdinalIgnoreCase))
+                || IsDeferredProviderParseText(trimmed)
+                || _providerCommandDescriptors.Any(i => IsProviderCommand(trimmed, i)))
             {
                 return false;
             }
@@ -808,27 +842,19 @@ public sealed class MyParserPlugin : PluginBase
 
         var parseText = GetStrictAutoParseText(message);
         var provider = string.IsNullOrWhiteSpace(parseText) ? null : _providerRegistry?.FindProvider(parseText);
-        if (provider is null && _providerRegistry?.FindProvider(message, out _) is { } fallbackProvider && !IsBilibiliProvider(fallbackProvider.Id))
+        if (provider is null && _providerRegistry?.FindProvider(message, out _) is { } fallbackProvider && !HasIncomingProviderNormalizer(fallbackProvider.Id))
         {
             provider = fallbackProvider;
         }
-        return provider?.Id switch
-        {
-            "douyin" => _config.AutoParseDouyinLinks,
-            "bilibili" => _config.AutoParseBilibiliLinks,
-            "bilibili-article" => _config.AutoParseBilibiliLinks,
-            "bilibili-bangumi" => _config.AutoParseBilibiliLinks,
-            "bilibili-live" => _config.AutoParseBilibiliLinks,
-            "xiaohongshu" => _config.AutoParseXiaohongshuLinks,
-            _ => false,
-        };
+
+        return IsAutoParseEnabledForProvider(provider);
     }
 
     private Task HandleAutoParseAsync(IncomingMessage message)
     {
-        if (TryBuildBilibiliPageLinkFromReply(message, out var pageLink))
+        if (TryBuildProviderReplyParseText(message, out var replyParseText))
         {
-            return DispatchParseAsync(message, pageLink, silentProviderMismatch: true);
+            return DispatchParseAsync(message, replyParseText, silentProviderMismatch: true);
         }
 
         var parseText = GetStrictAutoParseText(message);
@@ -837,7 +863,7 @@ public sealed class MyParserPlugin : PluginBase
             return DispatchParseAsync(message, parseText, silentProviderMismatch: true);
         }
 
-        if (_providerRegistry?.FindProvider(message, out parseText) is { } fallbackProvider && !IsBilibiliProvider(fallbackProvider.Id) && !string.IsNullOrWhiteSpace(parseText))
+        if (_providerRegistry?.FindProvider(message, out parseText) is { } fallbackProvider && !HasIncomingProviderNormalizer(fallbackProvider.Id) && !string.IsNullOrWhiteSpace(parseText))
         {
             return DispatchParseAsync(message, parseText, silentProviderMismatch: true);
         }
@@ -845,14 +871,60 @@ public sealed class MyParserPlugin : PluginBase
         return Task.CompletedTask;
     }
 
-    private static bool IsBilibiliProvider(string providerId)
-    {
-        return providerId.StartsWith("bilibili", StringComparison.OrdinalIgnoreCase);
-    }
-
     private string? GetStrictAutoParseText(IncomingMessage message)
     {
-        return _bilibiliTextNormalizer?.NormalizeParseText(message);
+        foreach (var normalizer in _incomingProviderTextNormalizers)
+        {
+            var normalized = normalizer.NormalizeParseText(message);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+        }
+
+        return null;
+    }
+
+    private bool TryBuildProviderReplyParseText(IncomingMessage message, out string parseText)
+    {
+        foreach (var builder in _providerReplyParseTextBuilders)
+        {
+            parseText = builder.TryBuildParseText(message) ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(parseText))
+            {
+                return true;
+            }
+        }
+
+        parseText = string.Empty;
+        return false;
+    }
+
+    private bool IsDeferredProviderParseText(string text)
+    {
+        return _providerReplyParseTextBuilders.Any(builder => builder.IsDeferredParseText(text));
+    }
+
+    private bool HasIncomingProviderNormalizer(string providerId)
+    {
+        var moduleId = GetModuleId(providerId);
+        return _incomingProviderTextNormalizers.Any(normalizer =>
+            normalizer is IMyParserProviderModule module
+            && string.Equals(module.Id, moduleId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool IsAutoParseEnabledForProvider(IParseProvider? provider)
+    {
+        if (provider is null)
+        {
+            return false;
+        }
+
+        var moduleId = GetModuleId(provider.Id);
+        var policy = _providerAutoParsePolicies.FirstOrDefault(item =>
+            item is IMyParserProviderModule module
+            && string.Equals(module.Id, moduleId, StringComparison.OrdinalIgnoreCase));
+        return policy?.IsAutoParseEnabled(_config) ?? false;
     }
 
     private Task HandleParseCommandAsync(IncomingMessage message)
@@ -865,73 +937,72 @@ public sealed class MyParserPlugin : PluginBase
         return DispatchParseAsync(message, string.IsNullOrWhiteSpace(content) ? text : content);
     }
 
-    private async Task HandleBilibiliLoginAsync(IncomingMessage message)
+    private void RegisterProviderCommands(IReadOnlyCollection<IMyParserProviderModule> modules, IReadOnlyList<IParseProvider> orderedProviders)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, BilibiliLoginCommand))
+        if (_hostServices is null)
         {
             return;
         }
 
-        if (_bilibiliMessageHandler is not null)
+        foreach (var module in modules)
         {
-            await _bilibiliMessageHandler.HandleLoginAsync(message);
+            if (module is not IProviderCommandContributor commandContributor)
+            {
+                continue;
+            }
+
+            var primaryProvider = orderedProviders.FirstOrDefault(provider => string.Equals(GetModuleId(provider.Id), module.Id, StringComparison.OrdinalIgnoreCase));
+            var primaryHandler = primaryProvider is null ? null : TryGetProviderMessageHandler(primaryProvider.Id);
+            AddProviderCommands(commandContributor.CreateCommands(new ProviderCommandContext(Context, _config, _hostServices, primaryProvider, primaryHandler)));
+        }
+
+        foreach (var runtimeModule in _providerRuntimeModules)
+        {
+            var primaryProvider = orderedProviders.FirstOrDefault(provider => runtimeModule.ProviderIds.Any(id => string.Equals(id, provider.Id, StringComparison.OrdinalIgnoreCase)));
+            var primaryHandler = primaryProvider is null ? null : TryGetProviderMessageHandler(primaryProvider.Id);
+            AddProviderCommands(runtimeModule.CreateCommands(new ProviderCommandContext(Context, _config, _hostServices, primaryProvider, primaryHandler)));
         }
     }
 
-    private async Task HandleXiaohongshuLoginAsync(IncomingMessage message)
+    private void AddProviderCommands(IEnumerable<ProviderCommandDescriptor> descriptors)
     {
-        if (!await EnsurePrivateAdminCommandAsync(message, XiaohongshuLoginCommand))
+        foreach (var descriptor in descriptors)
+        {
+            if (_providerCommandDescriptors.Any(i => string.Equals(i.Command, descriptor.Command, StringComparison.OrdinalIgnoreCase)))
+            {
+                BotLog.Warning($"MyParser provider command 重复，已忽略：{descriptor.Command}");
+                continue;
+            }
+
+            _providerCommandDescriptors.Add(descriptor);
+            FriendCommands.MapWhen(message => IsProviderCommand(message, descriptor), message => HandleProviderCommandAsync(message, descriptor));
+            GroupCommands.MapWhen(message => IsProviderCommand(message, descriptor), message => HandleProviderCommandAsync(message, descriptor));
+        }
+    }
+
+    private bool IsProviderCommand(IncomingMessage message, ProviderCommandDescriptor descriptor)
+    {
+        return IsProviderCommand(GetPlainText(message).TrimStart(), descriptor);
+    }
+
+    private static bool IsProviderCommand(string text, ProviderCommandDescriptor descriptor)
+    {
+        if (!text.StartsWith(descriptor.Command, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return text.Length == descriptor.Command.Length || char.IsWhiteSpace(text[descriptor.Command.Length]);
+    }
+
+    private async Task HandleProviderCommandAsync(IncomingMessage message, ProviderCommandDescriptor descriptor)
+    {
+        if (descriptor.AdminOnly && !await EnsurePrivateAdminCommandAsync(message, descriptor.Command))
         {
             return;
         }
 
-        if (_xiaohongshuMessageHandler is not null)
-        {
-            await _xiaohongshuMessageHandler.HandleLoginAsync(message);
-        }
-    }
-
-    private Task HandleDouyinCookieCheckAsync(IncomingMessage message)
-    {
-        return HandleProviderCookieCheckAsync(message, DouyinCookieCheckCommand, _douyinProvider, "Douyin");
-    }
-
-    private Task HandleBilibiliCookieCheckAsync(IncomingMessage message)
-    {
-        return HandleProviderCookieCheckAsync(message, BilibiliCookieCheckCommand, _bilibiliProvider, "Bilibili");
-    }
-
-    private Task HandleXiaohongshuCookieCheckAsync(IncomingMessage message)
-    {
-        return HandleProviderCookieCheckAsync(message, XiaohongshuCookieCheckCommand, _xiaohongshuProvider, "Xiaohongshu");
-    }
-
-    private async Task HandleProviderCookieCheckAsync(IncomingMessage message, string command, IParseProvider? provider, string platformName)
-    {
-        if (!await EnsurePrivateAdminCommandAsync(message, command))
-        {
-            return;
-        }
-
-        if (provider is not IProviderLoginStatusProvider loginStatusProvider)
-        {
-            await Context.Message.ReplyAsync(message, $"{platformName} 解析器尚未初始化或不支持 Cookie 检查。");
-            return;
-        }
-
-        try
-        {
-            var status = await loginStatusProvider.CheckLoginStatusAsync();
-            var detail = status.IsLogin
-                ? $"有效 / 已登录：{status.UserName ?? "未知用户"}" + (string.IsNullOrWhiteSpace(status.UserId) ? string.Empty : $" ({status.UserId})")
-                : status.NeedVerify ? "触发安全验证：" + status.Message : "无效 / 未登录：" + status.Message;
-            await Context.Message.ReplyAsync(message, $"{platformName}Cookie 状态：" + detail);
-        }
-        catch (Exception ex)
-        {
-            BotLog.Warning($"MyParser {platformName}Cookie 手动检查失败：{ex}");
-            await Context.Message.ReplyAsync(message, $"{platformName}Cookie 状态检查失败：" + ex.Message);
-        }
+        await descriptor.HandleAsync(message);
     }
 
     private async Task<bool> EnsurePrivateAdminCommandAsync(IncomingMessage message, string command)
@@ -955,75 +1026,38 @@ public sealed class MyParserPlugin : PluginBase
         }
     }
 
-    private static bool TryBuildBilibiliPageLinkFromReply(IncomingMessage message, out string pageLink)
+    private bool IsPluginResultMessage(string text)
     {
-        pageLink = string.Empty;
-        var text = GetPlainText(message).Trim();
-        if (!int.TryParse(text, out var page) || page <= 0)
-        {
-            return false;
-        }
-
-        var reply = message switch
-        {
-            GroupIncomingMessage group => group.GetReply(),
-            FriendIncomingMessage friend => friend.GetReply(),
-            _ => null,
-        };
-        if (reply is null)
-        {
-            return false;
-        }
-
-        var repliedText = string.Concat(reply.Segments.OfType<TextIncomingSegment>().Select(i => i.Text)).Trim();
-        if (!IsBilibiliPageTemplateLink(repliedText))
-        {
-            return false;
-        }
-
-        pageLink = repliedText + page;
-        return true;
-    }
-
-    private static bool IsBilibiliPageTemplateLink(string text)
-    {
-        return System.Text.RegularExpressions.Regex.IsMatch(
-            text.Trim(),
-            @"^https?://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}/?\?p=\s*$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    }
-
-    private static bool IsPluginResultMessage(string text)
-    {
-        return text.StartsWith("Bilibili 视频解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("Bilibili 直播解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("Bilibili 图文解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("Bilibili 专栏解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("Douyin 解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("抖音解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("小红书解析", StringComparison.OrdinalIgnoreCase)
-               || text.StartsWith("Xiaohongshu", StringComparison.OrdinalIgnoreCase);
+        return _providerResultMessageClassifiers.Any(classifier => classifier.IsPluginResultMessage(text))
+               || _providerRuntimeModules.Any(module => module.IsPluginResultMessage(text));
     }
 
     private Task DispatchParseAsync(IncomingMessage message, string text, bool silentProviderMismatch = false)
     {
-        text = _bilibiliTextNormalizer?.NormalizeParseText(text) ?? text;
-        if (IsBilibiliPageTemplateLink(text))
+        text = NormalizeParseText(text);
+        if (IsDeferredProviderParseText(text))
         {
             return Task.CompletedTask;
         }
 
         var provider = _providerRegistry?.FindProvider(text);
-        return provider?.Id switch
+        if (provider is null)
         {
-            "douyin" => _douyinMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
-            "bilibili" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
-            "bilibili-article" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
-            "bilibili-bangumi" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
-            "bilibili-live" => _bilibiliMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
-            "xiaohongshu" => _xiaohongshuMessageHandler?.ParseAndReplyAsync(message, text, silentProviderMismatch) ?? Task.CompletedTask,
-            _ => Context.Message.ReplyAsync(message, "未找到可处理该链接的解析提供商。"),
-        };
+            return Context.Message.ReplyAsync(message, "未找到可处理该链接的解析提供商。");
+        }
+
+        return TryGetProviderMessageHandler(provider.Id)?.ParseAndReplyAsync(message, text, silentProviderMismatch)
+               ?? Context.Message.ReplyAsync(message, $"{provider.Name} 已识别，但该 provider 未接入消息发送流程。");
+    }
+
+    private string NormalizeParseText(string text)
+    {
+        foreach (var normalizer in _providerTextNormalizers)
+        {
+            text = normalizer.NormalizeParseText(text) ?? text;
+        }
+
+        return text;
     }
 
     private static string GetPlainText(IncomingMessage message) => message switch

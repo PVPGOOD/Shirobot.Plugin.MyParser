@@ -59,6 +59,12 @@ internal sealed partial class DouyinMessageHandler : ProviderMessageHandlerBase
                 return;
             }
 
+            if (result.IsIgnored)
+            {
+                await TryReactToSourceMessageAsync(message, "426");
+                return;
+            }
+
             LogDouyinQualityInfo(result);
             var shouldDownloadVideo = _config.SendVideoSegment && result.IsVideo && !result.IsGallery;
             var videoSent = false;

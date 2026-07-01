@@ -20,6 +20,11 @@ public sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWor
     {
         var inputUrl = ExtractDouyinUrl(text) ?? throw new DouyinParseException("未检测到抖音链接。请发送 v.douyin.com 或 douyin.com 链接。");
         var resolvedUrl = await ResolveUrlAsync(inputUrl, cancellationToken);
+        if (IsLiveUrl(resolvedUrl))
+        {
+            return DouyinParseResult.IgnoredLive(resolvedUrl);
+        }
+
         var awemeId = ExtractAwemeId(resolvedUrl) ?? throw new DouyinParseException("未能从链接中提取作品 ID。可能不是公开视频/图集链接。");
 
         using var detail = await FetchAwemeDetailAsync(awemeId, resolvedUrl, cancellationToken);
@@ -27,6 +32,21 @@ public sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWor
         result = await TryApplyUserProfileAsync(result, cancellationToken);
         result = await TryApplyPublishCoverAsync(result, cancellationToken);
         return await TryApplySearchCoverAsync(result, cancellationToken);
+    }
+
+    private static bool IsLiveUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return string.Equals(uri.Host, "live.douyin.com", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(uri.Host, "webcast.amemv.com", StringComparison.OrdinalIgnoreCase)
+               || uri.AbsolutePath.Contains("/webcast/", StringComparison.OrdinalIgnoreCase)
+               || uri.AbsolutePath.Contains("/douyin/webcast/", StringComparison.OrdinalIgnoreCase)
+               || uri.Query.Contains("enter_from=live", StringComparison.OrdinalIgnoreCase)
+               || uri.Query.Contains("share_previous_page=live", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string> ResolveUrlAsync(string url, CancellationToken cancellationToken)

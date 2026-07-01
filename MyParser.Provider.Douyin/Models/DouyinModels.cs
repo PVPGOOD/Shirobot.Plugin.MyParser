@@ -3,6 +3,7 @@ namespace MyParser.Provider.Douyin.Models;
 public sealed record DouyinParseResult
 {
     public required string AwemeId { get; init; }
+    public bool IsIgnored { get; init; }
     public string? SourceUrl { get; init; }
     public string? Title { get; init; }
     public string? AuthorName { get; init; }
@@ -30,6 +31,14 @@ public sealed record DouyinParseResult
     public List<DouyinImageInfo> Images { get; init; } = [];
     public bool IsGallery => Images.Count > 0;
     public bool IsVideo => !string.IsNullOrWhiteSpace(VideoUrl);
+
+    public static DouyinParseResult IgnoredLive(string sourceUrl) => new()
+    {
+        AwemeId = "live",
+        SourceUrl = sourceUrl,
+        Title = "抖音直播",
+        IsIgnored = true,
+    };
 }
 
 public sealed record DouyinVideoQuality

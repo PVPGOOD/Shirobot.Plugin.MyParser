@@ -25,6 +25,19 @@ public sealed class DouyinParseProvider(DouyinParser parser) : IParseProviderWit
     public async Task<MediaParseResult> ParseAsync(string text, CancellationToken cancellationToken = default)
     {
         var result = await Parser.ParseAsync(text, cancellationToken);
+        if (result.IsIgnored)
+        {
+            return new MediaParseResult
+            {
+                ProviderId = Id,
+                ProviderName = Name,
+                MediaId = result.AwemeId,
+                SourceUrl = result.SourceUrl,
+                Title = result.Title,
+                ProviderPayload = result,
+            };
+        }
+
         return new MediaParseResult
         {
             ProviderId = Id,

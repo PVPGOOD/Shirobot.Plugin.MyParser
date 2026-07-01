@@ -137,15 +137,13 @@ private async Task SendCoverOrCardAsync(IncomingMessage message, XiaohongshuPars
         }
     }
 
-    private Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
+    private Task<ProviderImageBuildResult> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
     {
-        return _hostServices.BuildRemoteImageAsync(
-            ImageHttp,
+        return _hostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
             "小红书",
             imageUrl,
             referer,
             filePrefix,
-            ResolveDownloadDirectory(),
             request =>
             {
                 request.Headers.TryAddWithoutValidation("User-Agent", XiaohongshuConstants.UserAgent);
@@ -155,6 +153,6 @@ private async Task SendCoverOrCardAsync(IncomingMessage message, XiaohongshuPars
                 {
                     request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.XiaohongshuCookie);
                 }
-            });
+            }));
     }
 }

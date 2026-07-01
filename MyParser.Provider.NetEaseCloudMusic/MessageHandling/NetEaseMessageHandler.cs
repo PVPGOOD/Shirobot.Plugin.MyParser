@@ -1,11 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using Net.Codecrete.QrCodeGenerator;
-using SilkSharp;
-using SilkSharp.Codec;
 using MyParser.Provider.NetEaseCloudMusic.Infrastructure;
 using MyParser.Provider.NetEaseCloudMusic.Models;
 using MyParser.Provider.NetEaseCloudMusic.Parsing;
@@ -235,15 +232,12 @@ internal sealed partial class NetEaseMessageHandler(ProviderMessageHandlerContex
 
     private async Task<string> BuildCoverCardUriAsync(NetEaseParseResult result)
     {
-        using var imageHttp = HostServices.CreateImageHttpClient();
-        var coverImage = await HostServices.BuildRemoteImageAsync(
-            imageHttp,
+        var coverImage = await HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
             "网易云音乐",
             result.CoverUrl,
             result.SourceUrl,
             $"netease_cover_{result.SongId}",
-            Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "neteasecloudmusic", "covers"),
-            request => request.Headers.Referrer = new Uri("https://music.163.com/")).ConfigureAwait(false);
+            request => request.Headers.Referrer = new Uri("https://music.163.com/"))).ConfigureAwait(false);
 
         if (BotContext.Render is null)
         {
@@ -288,17 +282,14 @@ internal sealed partial class NetEaseMessageHandler(ProviderMessageHandlerContex
             throw new InvalidOperationException("Avalonia 渲染服务不可用。");
         }
 
-        using var imageHttp = HostServices.CreateImageHttpClient();
         var coverImage = string.IsNullOrWhiteSpace(result.CoverUrl)
-            ? (Uri: string.Empty, LocalPath: (string?)null)
-            : await HostServices.BuildRemoteImageAsync(
-                imageHttp,
+            ? new ProviderImageBuildResult(string.Empty, null)
+            : await HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
                 "网易云音乐",
                 result.CoverUrl,
                 result.SourceUrl,
                 $"netease_lyric_cover_{result.SongId}",
-                Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "neteasecloudmusic", "covers"),
-                request => request.Headers.Referrer = new Uri("https://music.163.com/")).ConfigureAwait(false);
+                request => request.Headers.Referrer = new Uri("https://music.163.com/"))).ConfigureAwait(false);
 
         var coverBitmap = !string.IsNullOrWhiteSpace(coverImage.LocalPath)
             ? HostServices.DecodeImageFileForRender(coverImage.LocalPath)
@@ -442,14 +433,20 @@ internal sealed partial class NetEaseMessageHandler(ProviderMessageHandlerContex
 
     private async Task SendRecordAsync(IncomingMessage message, NetEaseParseResult result)
     {
-        var localPath = await DownloadAudioToLocalAsync(result).ConfigureAwait(false);
+        var (_, localPath) = await HostServices.DownloadProviderAudioAsync(Config, BuildNetEaseAudioDownloadRequest(result)).ConfigureAwait(false);
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var variants = await BuildSilkRecordVariantsAsync(localPath, result).ConfigureAwait(false);
+            var variants = await HostServices.BuildSilkRecordVariantsAsync(Config, new ProviderRecordBuildRequest(
+                "neteasecloudmusic",
+                "网易云音乐",
+                result.SongId.ToString(),
+                localPath,
+                $"{result.Artists} - {result.Title}",
+                Config.SendNetEaseMobileBestRecord)).ConfigureAwait(false);
             foreach (var variant in variants)
             {
-                var recordUri = await BuildRecordUriAsync(variant.Path).ConfigureAwait(false);
+                var recordUri = await HostServices.BuildRecordUriAsync(variant.Path).ConfigureAwait(false);
                 var segment = new RecordOutgoingSegment(recordUri);
                 BotLog.Info($"MyParser 网易云音乐 SILK RecordSegment 发送开始: song_id={result.SongId}, variant={variant.Name}, scene={GetMessageScene(message)}, silk_path={variant.Path}, file_kb={new FileInfo(variant.Path).Length / 1024d:F1}, uri_mode={HostServices.GetUriMode(recordUri)}, uri_preview={HostServices.PreviewUri(recordUri)}");
                 await SendRecordSegmentAsync(message, segment, result.SongId, variant.Name, stopwatch).ConfigureAwait(false);
@@ -523,255 +520,20 @@ internal sealed partial class NetEaseMessageHandler(ProviderMessageHandlerContex
         }
     }
 
-    private async Task<IReadOnlyList<SilkRecordVariant>> BuildSilkRecordVariantsAsync(string localPath, NetEaseParseResult result)
+    private static ProviderAudioDownloadRequest BuildNetEaseAudioDownloadRequest(NetEaseParseResult result)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "neteasecloudmusic", "silk");
-        Directory.CreateDirectory(directory);
-        var safeBaseName = ProviderTextUtilities.SanitizeFileName($"{result.Artists} - {result.Title}_{result.SongId}", 120);
-
-        var mobile = new SilkRecordVariant(
-            "mobile-best",
-            "手机最优",
-            "pcm_rate=48000 silk_rate=100000 max=24000 packet=20 tencent=true filter=soxr",
-            Path.Combine(directory, safeBaseName + "_mobile_48k_100k_soxr_full.silk"),
-            100000);
-        var pc = new SilkRecordVariant(
-            "pc-best",
-            "电脑最优",
-            // QQ 电脑端对语音体积/码流兼容性较敏感，实测超过约 270KB 容易无法播放。
-            // 35k 在多数 59s 歌曲上会落在 260KB 左右，比 37.8k 更稳。
-            "pcm_rate=48000 silk_rate=35000 max=24000 packet=20 tencent=true filter=soxr",
-            Path.Combine(directory, safeBaseName + "_pc_48k_35000_soxr_full.silk"),
-            35000);
-
-        var variants = Config.SendNetEaseMobileBestRecord
-            ? new[] { pc, mobile }
-            : new[] { pc };
-
-        foreach (var variant in variants)
-        {
-            if (File.Exists(variant.Path) && new FileInfo(variant.Path).Length > 0)
-            {
-                continue;
-            }
-
-            await EncodeSilkAsync(localPath, variant.Path, variant.SilkRate).ConfigureAwait(false);
-        }
-
-        return variants;
-    }
-
-    private async Task EncodeSilkAsync(string inputPath, string outputSilkPath, int silkRate)
-    {
-        var ffmpeg = ResolveFfmpegPath() ?? throw new InvalidOperationException("未找到 ffmpeg。请在配置 FfmpegPath 中填写 ffmpeg.exe 路径，或将 ffmpeg 加入 PATH。");
-        // SilkSharp/native silkcodec 对非 ASCII 路径兼容性不好；这里使用纯 ASCII 临时路径，
-        // 编码成功后再移动到包含歌名的最终缓存路径。
-        var workDirectory = Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "neteasecloudmusic", "silk-work");
-        Directory.CreateDirectory(workDirectory);
-        var tempBaseName = "netease_" + Guid.NewGuid().ToString("N");
-        var tempPcmPath = Path.Combine(workDirectory, tempBaseName + ".pcm");
-        var tempSilkPath = Path.Combine(workDirectory, tempBaseName + ".silk");
-
-        try
-        {
-            await ConvertToPcmAsync(ffmpeg, inputPath, tempPcmPath).ConfigureAwait(false);
-
-            var encoder = new SilkEncoder
-            {
-                FS_API = 48000,
-                Rate = silkRate,
-                FS_MaxInternal = 24000,
-                PacketLength = 20,
-                Tencent = true,
-                Complecity = SilkComplecity.High,
-                Loss = 0,
-                DTX = false,
-                BandFEC = false,
-            };
-            await encoder.EncodeAsync(tempPcmPath, tempSilkPath).ConfigureAwait(false);
-
-            if (!File.Exists(tempSilkPath) || new FileInfo(tempSilkPath).Length == 0)
-            {
-                throw new InvalidDataException("SILK 编码输出为空。");
-            }
-
-            if (File.Exists(outputSilkPath)) File.Delete(outputSilkPath);
-            File.Move(tempSilkPath, outputSilkPath);
-            BotLog.Info($"MyParser 网易云音乐 SILK 编码完成: input={inputPath}, output={outputSilkPath}, silk_rate={silkRate}, size_kb={new FileInfo(outputSilkPath).Length / 1024d:F1}, encoder=DrAbc.SilkSharp");
-        }
-        finally
-        {
-            TryDeleteFile(tempPcmPath);
-            TryDeleteFile(tempSilkPath);
-        }
-    }
-
-    private static async Task ConvertToPcmAsync(string ffmpeg, string inputPath, string outputPcmPath)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpeg,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var arg in new[]
-        {
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-i", inputPath,
-            "-vn",
-            "-af", "aresample=resampler=soxr:precision=28",
-            "-ac", "1",
-            "-ar", "48000",
-            "-f", "s16le",
-            outputPcmPath,
-        })
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("ffmpeg PCM 转换进程启动失败。");
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        var timeout = TimeSpan.FromMinutes(3);
-        var waitTask = process.WaitForExitAsync();
-        if (await Task.WhenAny(waitTask, Task.Delay(timeout)).ConfigureAwait(false) != waitTask)
-        {
-            try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
-            throw new TimeoutException($"ffmpeg PCM 转换超时（>{timeout.TotalSeconds:F0}s）。");
-        }
-
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        var stderr = await stderrTask.ConfigureAwait(false);
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"ffmpeg PCM 转换失败(exit={process.ExitCode}): {stderr}\n{stdout}");
-        }
-
-        if (!File.Exists(outputPcmPath) || new FileInfo(outputPcmPath).Length == 0)
-        {
-            throw new InvalidDataException("ffmpeg PCM 转换输出为空。");
-        }
-    }
-
-    private static void TryDeleteFile(string path)
-    {
-        try
-        {
-            if (File.Exists(path)) File.Delete(path);
-        }
-        catch
-        {
-            // ignore cleanup failures
-        }
-    }
-
-    private string? ResolveFfmpegPath()
-    {
-        if (!string.IsNullOrWhiteSpace(Config.FfmpegPath) && File.Exists(Config.FfmpegPath))
-        {
-            return Config.FfmpegPath;
-        }
-
-        var executableName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        var candidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, executableName),
-            Path.Combine(AppContext.BaseDirectory, "vendor", "ffmpeg", "bin", executableName),
-            Path.Combine(Environment.CurrentDirectory, executableName),
-        };
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return OperatingSystem.IsWindows()
-            ? FindOnPath("ffmpeg.exe") ?? FindOnPath("ffmpeg")
-            : FindOnPath("ffmpeg") ?? FindOnPath("ffmpeg.exe");
-    }
-
-    private static string? FindOnPath(string fileName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            try
-            {
-                var fullPath = Path.Combine(directory, fileName);
-                if (File.Exists(fullPath)) return fullPath;
-            }
-            catch
-            {
-                // ignore invalid PATH entries
-            }
-        }
-        return null;
-    }
-
-    private sealed record SilkRecordVariant(string Name, string DisplayName, string Description, string Path, int SilkRate);
-
-    private static async Task<string> BuildRecordUriAsync(string localPath)
-    {
-        // Milky 的 record uri 支持 file/http/base64。这里用 base64:// 把本地文件内容交给适配器，
-        // 避免外部 Milky/QQ 进程无法访问 ShiroBot 进程本地 file:// 路径导致“接口返回成功但群里无语音”。
-        var bytes = await File.ReadAllBytesAsync(localPath).ConfigureAwait(false);
-        return "base64://" + Convert.ToBase64String(bytes);
-    }
-
-    private static async Task<string> DownloadAudioToLocalAsync(NetEaseParseResult result)
-    {
-        var directory = Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "neteasecloudmusic");
-        Directory.CreateDirectory(directory);
-        var extension = NormalizeExtension(result.FileType);
-        var fileName = ProviderTextUtilities.SanitizeFileName($"{result.Artists} - {result.Title}_{result.SongId}_{result.Quality}", 160) + extension;
-        var path = Path.Combine(directory, fileName);
-
-        if (File.Exists(path) && new FileInfo(path).Length > 0)
-        {
-            return path;
-        }
-
-        var tempPath = path + ".download";
-        if (File.Exists(tempPath))
-        {
-            File.Delete(tempPath);
-        }
-
-        using var http = new HttpClient(new SocketsHttpHandler
-        {
-            AllowAutoRedirect = true,
-            AutomaticDecompression = DecompressionMethods.All,
-            UseCookies = false,
-        })
-        {
-            Timeout = TimeSpan.FromMinutes(5),
-            DefaultRequestVersion = HttpVersion.Version11,
-            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
-        };
-        using var request = NetEaseHttp.CreateAudioRequest(HttpMethod.Get, result.AudioUrl);
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-
-        await using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-        await using (var output = File.Create(tempPath))
-        {
-            await input.CopyToAsync(output).ConfigureAwait(false);
-        }
-
-        if (new FileInfo(tempPath).Length == 0)
-        {
-            File.Delete(tempPath);
-            throw new InvalidDataException("网易云音乐下载到空文件。");
-        }
-
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
-        File.Move(tempPath, path);
-        return path;
+        var extension = NormalizeExtension(result.FileType).TrimStart('.');
+        return new ProviderAudioDownloadRequest(
+            "neteasecloudmusic",
+            "网易云音乐",
+            result.SongId.ToString(),
+            $"neteasecloudmusic:{result.SongId}:{result.Quality}:{result.FileType}",
+            result.AudioUrl,
+            string.Empty,
+            $"{result.Artists} - {result.Title}_{result.SongId}_{result.Quality}",
+            extension,
+            (method, url, range) => NetEaseHttp.CreateAudioRequest(method, url),
+            "song_id");
     }
 
     private static string NormalizeExtension(string? fileType)

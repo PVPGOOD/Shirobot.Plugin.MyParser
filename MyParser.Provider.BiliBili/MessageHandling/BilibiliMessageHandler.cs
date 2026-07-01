@@ -3,7 +3,7 @@ using System.Text;
 using Net.Codecrete.QrCodeGenerator;
 using ShiroBot.Model.Common;
 using Shirobot.Plugin.MyParser.Parsing;
-using MyParser.Provider.BiliBili.Downloads;
+using MyParser.Provider.BiliBili.Infrastructure;
 using MyParser.Provider.BiliBili.Services;
 using MyParser.Provider.BiliBili.Models;
 using ShiroBot.SDK.Abstractions;
@@ -19,7 +19,6 @@ internal sealed partial class BilibiliMessageHandler(
     IProviderHostServices hostServices)
     : ProviderMessageHandlerBase(new ProviderMessageHandlerContext(context, config, providerRegistry, bilibiliProvider, hostServices))
 {
-    private readonly HttpClient CoverHttp = hostServices.CreateImageHttpClient();
     private readonly IProviderHostServices _hostServices = hostServices;
 
     public override string ProviderId => "bilibili";
@@ -240,35 +239,70 @@ internal sealed partial class BilibiliMessageHandler(
             gate.EnsureVideoDownloadAllowed();
         }
 
-        var downloader = new BilibiliVideoDownloader(config, _hostServices);
-        var (fileUri, localPath) = await downloader.DownloadAndMuxAsync(result);
-        result.LocalVideoFileUri = fileUri;
+        var (fileUri, localPath) = await _hostServices.DownloadMuxedProviderVideoAsync(config, BuildBilibiliMuxedVideoDownloadRequest(result));
         result.LocalVideoPath = localPath;
+        result.LocalVideoFileUri = fileUri;
         LogFinalVideoFileInfo(result);
 
-        var fileSize = new FileInfo(localPath).Length;
-        string videoUri;
-        string uriMode;
-        if (config.FileProtocol == VideoSegmentFileProtocol.Base64)
+        var segmentResult = await _hostServices.BuildLocalVideoSegmentAsync(config, new ProviderLocalVideoSegmentRequest(
+            "Bilibili",
+            result.Bvid,
+            localPath,
+            fileUri,
+            result.CoverUrl,
+            "bvid"));
+        result.LocalVideoRegisteredToHttpServer = segmentResult.RegisteredToHttpServer;
+        return segmentResult.Segment;
+    }
+
+    private static ProviderMuxedVideoDownloadRequest BuildBilibiliMuxedVideoDownloadRequest(BilibiliParseResult result)
+    {
+        return new ProviderMuxedVideoDownloadRequest(
+            "bilibili",
+            "Bilibili",
+            result.Bvid,
+            $"bilibili:{result.Bvid}:p{result.Page}:cid{result.Cid}",
+            result.Title,
+            MyParserRuntime.BilibiliDownloadDirectory,
+            result.VideoStreams.Select(ToProviderMuxedStream).ToArray(),
+            result.AudioStreams.Select(ToProviderMuxedStream).ToArray(),
+            (method, url, range) => CreateBilibiliMediaRequest(method, url, result, range),
+            "bvid");
+    }
+
+    private static ProviderMuxedMediaStream ToProviderMuxedStream(BilibiliMediaStream stream)
+    {
+        return new ProviderMuxedMediaStream(
+            stream.StreamId,
+            stream.Url,
+            stream.BackupUrls,
+            stream.QualityId,
+            stream.QualityName,
+            stream.Width,
+            stream.Height,
+            stream.Fps,
+            stream.CodecName,
+            stream.IsAudio);
+    }
+
+    private static HttpRequestMessage CreateBilibiliMediaRequest(HttpMethod method, string url, BilibiliParseResult result, string? range)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
+        request.Headers.TryAddWithoutValidation("Referer", result.SourceUrl ?? $"https://www.bilibili.com/video/{result.Bvid}/");
+        request.Headers.TryAddWithoutValidation("Origin", BilibiliConstants.Origin);
+        request.Headers.TryAddWithoutValidation("Accept", "*/*");
+        if (!string.IsNullOrWhiteSpace(range))
         {
-            videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
-            uriMode = "base64";
-        }
-        else if (config.FileProtocol == VideoSegmentFileProtocol.Http)
-        {
-            videoUri = _hostServices.RegisterLocalVideoFile(localPath);
-            result.LocalVideoRegisteredToHttpServer = true;
-            uriMode = "http";
-        }
-        else
-        {
-            videoUri = fileUri;
-            uriMode = "file";
+            request.Headers.TryAddWithoutValidation("Range", range);
         }
 
-        BotLog.Info($"MyParser Bilibili VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={_hostServices.PreviewUri(videoUri)}");
-        var thumbUri = !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
-        return new VideoOutgoingSegment(videoUri, thumbUri);
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
+        }
+
+        return request;
     }
 
     private Task StartSendCoverMessageAsync(IncomingMessage message, BilibiliParseResult result)
@@ -554,10 +588,6 @@ internal sealed partial class BilibiliMessageHandler(
         return sb.ToString().TrimEnd();
     }
 
-    private static string ResolveCoverDownloadDirectory()
-    {
-        return MyParserRuntime.BilibiliDownloadDirectory;
-    }
 
     private static string TrimLine(string value, int maxLength) => ProviderTextUtilities.TrimLine(value, maxLength);
 

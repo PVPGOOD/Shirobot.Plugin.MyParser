@@ -50,7 +50,7 @@ private async Task SendCoverMessageAsync(IncomingMessage message, DouyinParseRes
     {
         var coverTask = BuildCoverImageAsync(result);
         var avatarTask = _context.Render is null
-            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            ? Task.FromResult(new ProviderImageBuildResult(string.Empty, null))
             : BuildRemoteImageAsync(result.AuthorAvatarUrl, result.SourceUrl, $"douyin_avatar_{result.AwemeId}");
         var coverImage = await coverTask;
         var coverUri = coverImage.Uri;
@@ -198,32 +198,25 @@ private async Task SendCoverMessageAsync(IncomingMessage message, DouyinParseRes
         return value.ToString();
     }
 
-    private async Task<(string Uri, string? LocalPath)> BuildCoverImageAsync(DouyinParseResult result)
+    private Task<ProviderImageBuildResult> BuildCoverImageAsync(DouyinParseResult result)
     {
         var coverUrl = result.CoverUrl ?? throw new InvalidOperationException("封面 URL 为空。");
-        return await BuildRemoteImageAsync(coverUrl, result.SourceUrl, $"douyin_cover_{result.AwemeId}");
+        return BuildRemoteImageAsync(coverUrl, result.SourceUrl, $"douyin_cover_{result.AwemeId}");
     }
 
-    private Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
+    private Task<ProviderImageBuildResult> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
     {
-        return _hostServices.BuildRemoteImageAsync(
-            CoverHttp,
+        return _hostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
             "抖音",
             imageUrl,
             referer,
             filePrefix,
-            ResolveCoverDownloadDirectory(),
             request =>
             {
                 request.Headers.TryAddWithoutValidation("User-Agent", DouyinConstants.UserAgent);
                 request.Headers.TryAddWithoutValidation("Referer", referer ?? "https://www.douyin.com/");
                 request.Headers.TryAddWithoutValidation("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
-            });
-    }
-
-    private string ResolveCoverDownloadDirectory()
-    {
-        return MyParserRuntime.DownloadDirectory;
+            }));
     }
 
     private void LogCoverImageInfo(DouyinParseResult result, string mode, long bytes, string uri)

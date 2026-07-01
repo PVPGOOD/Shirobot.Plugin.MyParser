@@ -82,29 +82,15 @@ private async Task SendVideoFlowAsync(IncomingMessage message, XiaohongshuParseR
         var (fileUri, localPath) = await DownloadVideoAsync(result);
         result.LocalVideoFileUri = fileUri;
         result.LocalVideoPath = localPath;
-        var fileSize = new FileInfo(localPath).Length;
-        string videoUri;
-        string uriMode;
-        if (_config.FileProtocol == VideoSegmentFileProtocol.Base64)
-        {
-            videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
-            uriMode = "base64";
-        }
-        else if (_config.FileProtocol == VideoSegmentFileProtocol.Http)
-        {
-            videoUri = _hostServices.RegisterLocalVideoFile(localPath);
-            result.LocalVideoRegisteredToHttpServer = true;
-            uriMode = "http";
-        }
-        else
-        {
-            videoUri = fileUri;
-            uriMode = "file";
-        }
-
-        BotLog.Info($"MyParser 小红书 VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={_hostServices.PreviewUri(videoUri)}");
-        var thumbUri = !string.IsNullOrWhiteSpace(result.CoverUrl) ? result.CoverUrl : null;
-        return new VideoOutgoingSegment(videoUri, thumbUri);
+        var segmentResult = await _hostServices.BuildLocalVideoSegmentAsync(_config, new ProviderLocalVideoSegmentRequest(
+            "小红书",
+            result.NoteId,
+            localPath,
+            fileUri,
+            result.CoverUrl,
+            "note_id"));
+        result.LocalVideoRegisteredToHttpServer = segmentResult.RegisteredToHttpServer;
+        return segmentResult.Segment;
     }
 
     private Task<(string FileUri, string LocalPath)> DownloadVideoAsync(XiaohongshuParseResult result)

@@ -16,8 +16,6 @@ namespace MyParser.Provider.Xiaohongshu.MessageHandling;
 
 internal sealed partial class XiaohongshuMessageHandler : ProviderMessageHandlerBase
 {
-    private readonly HttpClient ImageHttp;
-
     public override string ProviderId => "xiaohongshu";
 
     private readonly IBotContext _context;
@@ -34,7 +32,6 @@ internal sealed partial class XiaohongshuMessageHandler : ProviderMessageHandler
         _providerRegistry = providerRegistry;
         _provider = provider;
         _hostServices = hostServices;
-        ImageHttp = hostServices.CreateImageHttpClient();
     }
 
     public override async Task ParseAndReplyAsync(IncomingMessage message, string text, bool silentProviderMismatch = false)

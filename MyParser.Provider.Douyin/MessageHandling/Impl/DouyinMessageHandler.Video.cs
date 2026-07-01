@@ -28,31 +28,15 @@ private async Task<VideoOutgoingSegment?> BuildVideoSegmentAsync(DouyinParseResu
         result.LocalVideoPath = localPath;
         LogFinalVideoFileInfo(result);
 
-        var fileSize = new FileInfo(localPath).Length;
-        string videoUri;
-        string uriMode;
-        if (_config.FileProtocol == VideoSegmentFileProtocol.Base64)
-        {
-            videoUri = "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath));
-            uriMode = "base64";
-        }
-        else if (_config.FileProtocol == VideoSegmentFileProtocol.Http)
-        {
-            videoUri = _hostServices.RegisterLocalVideoFile(localPath);
-            result.LocalVideoRegisteredToHttpServer = true;
-            uriMode = "http";
-        }
-        else
-        {
-            videoUri = fileUri;
-            uriMode = "file";
-        }
-
-        BotLog.Info($"MyParser VideoSegment URI 模式：{uriMode}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={_hostServices.PreviewUri(videoUri)}");
-        var thumbUri = !string.IsNullOrWhiteSpace(result.CoverUrl)
-            ? result.CoverUrl
-            : null;
-        return new VideoOutgoingSegment(videoUri, thumbUri);
+        var segmentResult = await _hostServices.BuildLocalVideoSegmentAsync(_config, new ProviderLocalVideoSegmentRequest(
+            "抖音",
+            result.AwemeId,
+            localPath,
+            fileUri,
+            result.CoverUrl,
+            "aweme_id"));
+        result.LocalVideoRegisteredToHttpServer = segmentResult.RegisteredToHttpServer;
+        return segmentResult.Segment;
     }
 
     private Task<(string FileUri, string LocalPath)> DownloadVideoAsync(DouyinParseResult result)

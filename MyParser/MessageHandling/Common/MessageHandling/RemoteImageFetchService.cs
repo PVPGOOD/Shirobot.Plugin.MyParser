@@ -9,14 +9,13 @@ internal static class RemoteImageFetchService
     private const long DefaultMaxImageBytes = 10 * 1024L * 1024L;
 
     public static async Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(
-        HttpClient http,
         string platformName,
         string? imageUrl,
         string? referer,
         string filePrefix,
-        string localDirectory,
         Action<HttpRequestMessage>? configureRequest = null,
-        long maxBytes = DefaultMaxImageBytes)
+        long maxBytes = DefaultMaxImageBytes,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(imageUrl))
         {
@@ -26,10 +25,11 @@ internal static class RemoteImageFetchService
         try
         {
             BotLog.Info($"MyParser {platformName} 图片下载开始: prefix={filePrefix}, source_url={imageUrl}, referer={referer}");
+            using var http = CreateImageHttpClient();
             using var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
             configureRequest?.Invoke(request);
 
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var contentLength = response.Content.Headers.ContentLength;
@@ -39,13 +39,13 @@ internal static class RemoteImageFetchService
                 return (imageUrl, null);
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync();
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var output = new MemoryStream();
             var buffer = new byte[64 * 1024];
             long total = 0;
             while (true)
             {
-                var read = await input.ReadAsync(buffer);
+                var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (read == 0)
                 {
                     break;

@@ -16,8 +16,6 @@ namespace MyParser.Provider.Douyin.MessageHandling;
 
 internal sealed partial class DouyinMessageHandler : ProviderMessageHandlerBase
 {
-    private readonly HttpClient CoverHttp;
-
     public override string ProviderId => "douyin";
 
     private readonly IBotContext _context;
@@ -39,7 +37,6 @@ internal sealed partial class DouyinMessageHandler : ProviderMessageHandlerBase
         _providerRegistry = providerRegistry;
         _douyinProvider = douyinProvider;
         _hostServices = hostServices;
-        CoverHttp = hostServices.CreateImageHttpClient();
     }
 
     public override async Task ParseAndReplyAsync(IncomingMessage message, string text, bool silentProviderMismatch = false)

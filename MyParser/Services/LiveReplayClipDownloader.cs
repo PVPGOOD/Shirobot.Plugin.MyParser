@@ -2,14 +2,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Text;
-using MyParser.Provider.BiliBili.Infrastructure;
-using MyParser.Provider.BiliBili.Models;
-using ShiroBot.SDK.Abstractions;
 using Shirobot.Plugin.MyParser.Parsing;
+using Shirobot.Plugin.MyParser.Utility;
+using ShiroBot.SDK.Abstractions;
 
-namespace MyParser.Provider.BiliBili.Downloads;
+namespace Shirobot.Plugin.MyParser.Services;
 
-internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderHostServices hostServices)
+internal sealed class LiveReplayClipDownloader(PluginConfig config, ProviderDownloadService hostServices)
 {
     private const int MaxPlaylistBytes = 2 * 1024 * 1024;
 
@@ -19,32 +18,23 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         AllowAutoRedirect = true,
     });
 
-    public async Task<BilibiliLiveClipDownloadResult> DownloadRecentClipAsync(BilibiliLiveParseResult result, Func<BilibiliLiveClipProgress, Task>? progress = null, CancellationToken cancellationToken = default)
+    public async Task<ProviderLiveReplayClipDownloadResult> DownloadAsync(ProviderLiveReplayClipDownloadRequest request, CancellationToken cancellationToken = default)
     {
-        if (result.LiveStatus != 1)
-        {
-            throw new BilibiliParseException("直播间当前未开播，无法截取直播片段。");
-        }
-
-        var stream = SelectClipStream(result) ?? throw new BilibiliParseException("直播间未返回可用于截取的播放流。");
+        var stream = request.Streams.OrderBy(request.StreamRank).FirstOrDefault()
+                     ?? throw new InvalidOperationException($"{request.PlatformDisplayName} 未返回可用于截取的播放流。");
         var ffmpeg = ResolveFfmpegPath();
         if (string.IsNullOrWhiteSpace(ffmpeg))
         {
-            throw new BilibiliParseException("未找到 ffmpeg。请在配置 FfmpegPath 中填写 ffmpeg.exe 路径，或将 ffmpeg 加入 PATH。");
+            throw new InvalidOperationException("未找到 ffmpeg。请在配置 FfmpegPath 中填写 ffmpeg.exe 路径，或将 ffmpeg 加入 PATH。");
         }
 
-        var dir = ResolveClipDirectory(result);
+        var dir = ResolveClipDirectory(request);
         Directory.CreateDirectory(dir);
         try
         {
-            var outputPath = Path.Combine(dir, $"live_{SanitizeFileName(result.RealRoomId, 40)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.mp4");
+            var outputPath = Path.Combine(dir, $"live_{SanitizeFileName(request.MediaId, 40)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.mp4");
             var durationSeconds = Math.Clamp(config.BilibiliLiveReplayClipSeconds, 3, 3000);
-            var playlist = await BuildStaticReplayPlaylistAsync(stream.Url, result.SourceUrl, dir, durationSeconds, cancellationToken);
-            if (progress is not null)
-            {
-                await progress(new BilibiliLiveClipProgress(playlist.SelectedSegments, playlist.TotalSegments, playlist.ActualSeconds, stream, playlist.Path));
-            }
-
+            var playlist = await BuildStaticReplayPlaylistAsync(request, stream.Url, dir, durationSeconds, cancellationToken);
             var timeoutSeconds = Math.Max(30, durationSeconds * 2 + 60);
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -52,8 +42,8 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
             await CutStaticLiveClipAsync(ffmpeg, playlist.Path, outputPath, timeoutSeconds, linkedCts.Token);
             await ValidateClipAsync(outputPath, cancellationToken);
 
-            BotLog.Info($"MyParser Bilibili 直播回看片段生成完成: room_id={result.RealRoomId}, requested_duration={durationSeconds}s, actual_seconds={playlist.ActualSeconds:F1}, segments={playlist.SelectedSegments}/{playlist.TotalSegments}, stream={stream.Protocol}/{stream.Format}/{stream.Codec}, qn={stream.CurrentQn}, file_mb={new FileInfo(outputPath).Length / 1024d / 1024d:F2}, file={outputPath}");
-            return new BilibiliLiveClipDownloadResult(new Uri(outputPath).AbsoluteUri, outputPath, stream, playlist.SelectedSegments, playlist.TotalSegments, playlist.ActualSeconds, playlist.Path);
+            BotLog.Info($"MyParser {request.PlatformDisplayName} 直播回看片段生成完成: {request.IdentifierName}={request.MediaId}, requested_duration={durationSeconds}s, actual_seconds={playlist.ActualSeconds:F1}, segments={playlist.SelectedSegments}/{playlist.TotalSegments}, stream={stream.Protocol}/{stream.Format}/{stream.Codec}, qn={stream.CurrentQn}, file_mb={new FileInfo(outputPath).Length / 1024d / 1024d:F2}, file={outputPath}");
+            return new ProviderLiveReplayClipDownloadResult(new Uri(outputPath).AbsoluteUri, outputPath, stream, playlist.SelectedSegments, playlist.TotalSegments, playlist.ActualSeconds, playlist.Path);
         }
         catch
         {
@@ -62,28 +52,14 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         }
     }
 
-    private static BilibiliLiveStream? SelectClipStream(BilibiliLiveParseResult result)
-    {
-        return result.Streams.FirstOrDefault(i =>
-                   string.Equals(i.Protocol, "http_hls", StringComparison.OrdinalIgnoreCase)
-                   && string.Equals(i.Format, "ts", StringComparison.OrdinalIgnoreCase)
-                   && string.Equals(i.Codec, "avc", StringComparison.OrdinalIgnoreCase))
-               ?? result.Streams.FirstOrDefault(i =>
-                   string.Equals(i.Protocol, "http_hls", StringComparison.OrdinalIgnoreCase)
-                   && string.Equals(i.Codec, "avc", StringComparison.OrdinalIgnoreCase))
-               ?? result.Streams.FirstOrDefault(i =>
-                   string.Equals(i.Protocol, "http_hls", StringComparison.OrdinalIgnoreCase))
-               ?? result.Streams.FirstOrDefault();
-    }
-
-    private async Task<BilibiliLiveStaticPlaylistResult> BuildStaticReplayPlaylistAsync(string playlistUrl, string referer, string dir, int durationSeconds, CancellationToken cancellationToken)
+    private async Task<LiveStaticPlaylistResult> BuildStaticReplayPlaylistAsync(ProviderLiveReplayClipDownloadRequest request, string playlistUrl, string dir, int durationSeconds, CancellationToken cancellationToken)
     {
         var segmentDir = Path.Combine(dir, $"segments_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}");
         Directory.CreateDirectory(segmentDir);
         var maxBytes = config.BilibiliLiveReplayClipMaxMegabytes <= 0
             ? long.MaxValue
             : config.BilibiliLiveReplayClipMaxMegabytes * 1024L * 1024L;
-        var (parsed, downloadedSegments, totalSeconds, resolvedPlaylistUrl) = await WaitForEnoughReplaySegmentsAsync(playlistUrl, referer, durationSeconds, segmentDir, maxBytes, cancellationToken);
+        var (parsed, downloadedSegments, totalSeconds, resolvedPlaylistUrl) = await WaitForEnoughReplaySegmentsAsync(request, playlistUrl, durationSeconds, segmentDir, maxBytes, cancellationToken);
         playlistUrl = resolvedPlaylistUrl;
         var selected = downloadedSegments.Select(i => i.Segment).ToList();
 
@@ -122,11 +98,11 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         staticPlaylist.AppendLine("#EXT-X-ENDLIST");
         var path = Path.Combine(dir, $"live_static_{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}.m3u8");
         await File.WriteAllTextAsync(path, staticPlaylist.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
-        BotLog.Info($"MyParser Bilibili 直播回溯 m3u8 已冻结: source={PreviewUrl(playlistUrl)}, segments={selected.Count}/{parsed.Segments.Count}, seconds={totalSeconds:F1}/{durationSeconds}, path={path}");
-        return new BilibiliLiveStaticPlaylistResult(path, selected.Count, parsed.Segments.Count, totalSeconds);
+        BotLog.Info($"MyParser {request.PlatformDisplayName} 直播回溯 m3u8 已冻结: source={PreviewUrl(playlistUrl)}, segments={selected.Count}/{parsed.Segments.Count}, seconds={totalSeconds:F1}/{durationSeconds}, path={path}");
+        return new LiveStaticPlaylistResult(path, selected.Count, parsed.Segments.Count, totalSeconds);
     }
 
-    private async Task<(HlsPlaylist Parsed, List<(HlsSegment Segment, string LocalPath)> Selected, double TotalSeconds, string PlaylistUrl)> WaitForEnoughReplaySegmentsAsync(string playlistUrl, string referer, int durationSeconds, string segmentDir, long maxBytes, CancellationToken cancellationToken)
+    private async Task<(HlsPlaylist Parsed, List<(HlsSegment Segment, string LocalPath)> Selected, double TotalSeconds, string PlaylistUrl)> WaitForEnoughReplaySegmentsAsync(ProviderLiveReplayClipDownloadRequest request, string playlistUrl, int durationSeconds, string segmentDir, long maxBytes, CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Min(durationSeconds + 15, 90));
         var resolvedPlaylistUrl = playlistUrl;
@@ -137,18 +113,18 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
 
         while (true)
         {
-            var playlistText = await FetchPlaylistTextAsync(resolvedPlaylistUrl, referer, cancellationToken);
+            var playlistText = await FetchPlaylistTextAsync(request, resolvedPlaylistUrl, cancellationToken);
             if (playlistText.Contains("#EXT-X-STREAM-INF", StringComparison.OrdinalIgnoreCase))
             {
                 resolvedPlaylistUrl = ResolveFirstMediaPlaylistUrl(playlistText, resolvedPlaylistUrl)
-                                      ?? throw new BilibiliParseException("直播 m3u8 是 master playlist，但未找到 media playlist。");
-                playlistText = await FetchPlaylistTextAsync(resolvedPlaylistUrl, referer, cancellationToken);
+                                      ?? throw new InvalidOperationException("直播 m3u8 是 master playlist，但未找到 media playlist。");
+                playlistText = await FetchPlaylistTextAsync(request, resolvedPlaylistUrl, cancellationToken);
             }
 
             var parsed = ParseMediaPlaylist(playlistText, resolvedPlaylistUrl);
             if (parsed.Segments.Count == 0)
             {
-                throw new BilibiliParseException("当前直播 m3u8 未包含可回溯分片。");
+                throw new InvalidOperationException("当前直播 m3u8 未包含可回溯分片。");
             }
 
             var newSegments = 0;
@@ -158,7 +134,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
                 {
                     var extension = GuessSegmentExtension(segment.Uri);
                     var localPath = Path.Combine(segmentDir, $"seg_{downloadedSegments.Count:D4}{extension}");
-                    var bytes = await DownloadSegmentAsync(segment.Uri, localPath, referer, maxBytes - downloadedBytes, cancellationToken);
+                    var bytes = await DownloadSegmentAsync(request, segment.Uri, localPath, maxBytes - downloadedBytes, cancellationToken);
                     downloadedBytes += bytes;
                     collectedSegments.Add(segment);
                     downloadedSegments.Add(segment.Uri, (segment, localPath, bytes));
@@ -176,7 +152,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
             {
                 if (totalSeconds < durationSeconds)
                 {
-                    BotLog.Warning($"MyParser Bilibili 直播回溯分片不足配置时长: requested={durationSeconds}s, available={totalSeconds:F1}s, segments={selected.Count}/{collectedSegments.Count}, latest_window={parsed.Segments.Count}");
+                    BotLog.Warning($"MyParser {request.PlatformDisplayName} 直播回溯分片不足配置时长: requested={durationSeconds}s, available={totalSeconds:F1}s, segments={selected.Count}/{collectedSegments.Count}, latest_window={parsed.Segments.Count}");
                 }
 
                 return (collectedPlaylist, selected.Select(i =>
@@ -187,7 +163,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
             }
 
             var waitSeconds = Math.Clamp(durationSeconds - totalSeconds, 2, 5);
-            BotLog.Info($"MyParser Bilibili 直播回溯分片不足，等待更多分片: requested={durationSeconds}s, available={totalSeconds:F1}s, collected={collectedSegments.Count}, latest_window={parsed.Segments.Count}, new={newSegments}, wait={waitSeconds:F1}s");
+            BotLog.Info($"MyParser {request.PlatformDisplayName} 直播回溯分片不足，等待更多分片: requested={durationSeconds}s, available={totalSeconds:F1}s, collected={collectedSegments.Count}, latest_window={parsed.Segments.Count}, new={newSegments}, wait={waitSeconds:F1}s");
             await Task.Delay(TimeSpan.FromSeconds(waitSeconds), cancellationToken);
         }
     }
@@ -209,25 +185,14 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         return selected;
     }
 
-    private async Task<string> FetchPlaylistTextAsync(string playlistUrl, string referer, CancellationToken cancellationToken)
+    private async Task<string> FetchPlaylistTextAsync(ProviderLiveReplayClipDownloadRequest request, string playlistUrl, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, playlistUrl);
-        request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
-        request.Headers.TryAddWithoutValidation("Referer", string.IsNullOrWhiteSpace(referer) ? "https://live.bilibili.com/" : referer);
-        request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
-        request.Headers.TryAddWithoutValidation("Accept", "application/vnd.apple.mpegurl, application/x-mpegURL, */*");
-        request.Headers.TryAddWithoutValidation("Cache-Control", "no-cache");
-        request.Headers.TryAddWithoutValidation("Pragma", "no-cache");
-        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
-        {
-            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
-        }
-
-        using var response = await PlaylistHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var httpRequest = request.CreatePlaylistRequest(HttpMethod.Get, playlistUrl, null);
+        using var response = await PlaylistHttp.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is > MaxPlaylistBytes)
         {
-            throw new BilibiliParseException($"直播 m3u8 过大：{response.Content.Headers.ContentLength.Value / 1024}KB。");
+            throw new InvalidOperationException($"直播 m3u8 过大：{response.Content.Headers.ContentLength.Value / 1024}KB。");
         }
 
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -244,7 +209,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
             output.Write(buffer, 0, read);
             if (output.Length > MaxPlaylistBytes)
             {
-                throw new BilibiliParseException($"直播 m3u8 读取超过限制：{MaxPlaylistBytes / 1024}KB。");
+                throw new InvalidOperationException($"直播 m3u8 读取超过限制：{MaxPlaylistBytes / 1024}KB。");
             }
         }
 
@@ -282,7 +247,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         psi.ArgumentList.Add("+faststart");
         psi.ArgumentList.Add(outputPath);
 
-        using var process = Process.Start(psi) ?? throw new BilibiliParseException("ffmpeg 启动失败。");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("ffmpeg 启动失败。");
         try
         {
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -293,24 +258,24 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
             if (process.ExitCode != 0)
             {
                 var detail = TrimFfmpegDetail(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
-                throw new BilibiliParseException("ffmpeg 截取直播片段失败：" + detail);
+                throw new InvalidOperationException("ffmpeg 截取直播片段失败：" + detail);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
-            throw new BilibiliParseException($"ffmpeg 截取直播片段超时（>{timeoutSeconds}s）。");
+            throw new InvalidOperationException($"ffmpeg 截取直播片段超时（>{timeoutSeconds}s）。");
         }
     }
 
-    private async Task<long> DownloadSegmentAsync(string url, string localPath, string referer, long remainingBytes, CancellationToken cancellationToken)
+    private async Task<long> DownloadSegmentAsync(ProviderLiveReplayClipDownloadRequest request, string url, string localPath, long remainingBytes, CancellationToken cancellationToken)
     {
         if (remainingBytes <= 0)
         {
-            throw new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。");
+            throw new InvalidOperationException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。");
         }
 
-        var request = new HttpRangeDownloadRequest(
+        var downloadRequest = new HttpRangeDownloadRequest(
             url,
             localPath,
             Path.GetFileName(localPath),
@@ -318,42 +283,22 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
             true,
             1,
             4,
-            (method, range) => CreateSegmentRequest(method, url, referer, range),
-            statusCode => new BilibiliParseException($"直播分片下载 HTTP {(int)statusCode}"),
-            _ => new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。"),
-            () => new BilibiliParseException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。"),
-            (index, statusCode) => new BilibiliParseException($"直播分片 {index} 不支持 Range：HTTP {(int)statusCode}"),
-            (index, contentRange) => new BilibiliParseException($"直播分片 {index} Content-Range 不匹配：{contentRange}"),
-            (index, copied, expected) => new BilibiliParseException($"直播分片 {index} 大小不匹配：{copied} != {expected}"),
-            (actual, expected) => new BilibiliParseException($"直播分片合并大小不匹配：{actual} != {expected}"));
+            (method, range) => request.CreateSegmentRequest(method, url, range),
+            statusCode => new InvalidOperationException($"直播分片下载 HTTP {(int)statusCode}"),
+            _ => new InvalidOperationException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。"),
+            () => new InvalidOperationException($"直播片段超过大小限制：{config.BilibiliLiveReplayClipMaxMegabytes}MB。"),
+            (index, statusCode) => new InvalidOperationException($"直播分片 {index} 不支持 Range：HTTP {(int)statusCode}"),
+            (index, contentRange) => new InvalidOperationException($"直播分片 {index} Content-Range 不匹配：{contentRange}"),
+            (index, copied, expected) => new InvalidOperationException($"直播分片 {index} 大小不匹配：{copied} != {expected}"),
+            (actual, expected) => new InvalidOperationException($"直播分片合并大小不匹配：{actual} != {expected}"));
 
-        var total = await hostServices.DownloadAsync(request, config.LogDownloadProgress, 2, "MyParser Bilibili 直播", "segment", cancellationToken);
+        var total = await hostServices.DownloadAsync(downloadRequest, config.LogDownloadProgress, 2, $"MyParser {request.PlatformDisplayName} 直播", "segment", cancellationToken);
         if (total <= 0)
         {
-            throw new BilibiliParseException("直播分片下载到空文件。");
+            throw new InvalidOperationException("直播分片下载到空文件。");
         }
 
         return total;
-    }
-
-    private static HttpRequestMessage CreateSegmentRequest(HttpMethod method, string url, string referer, string? range)
-    {
-        var request = new HttpRequestMessage(method, url);
-        request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
-        request.Headers.TryAddWithoutValidation("Referer", string.IsNullOrWhiteSpace(referer) ? "https://live.bilibili.com/" : referer);
-        request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
-        request.Headers.TryAddWithoutValidation("Accept", "*/*");
-        if (!string.IsNullOrWhiteSpace(range))
-        {
-            request.Headers.TryAddWithoutValidation("Range", range);
-        }
-
-        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
-        {
-            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
-        }
-
-        return request;
     }
 
     private static string GuessSegmentExtension(string uri)
@@ -518,7 +463,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         var info = new FileInfo(path);
         if (!info.Exists || info.Length < 1024)
         {
-            throw new BilibiliParseException("ffmpeg 输出的直播片段为空或过小。");
+            throw new InvalidDataException("ffmpeg 输出的直播片段为空或过小。");
         }
 
         var maxBytes = config.BilibiliLiveReplayClipMaxMegabytes <= 0
@@ -527,7 +472,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         if (info.Length > maxBytes)
         {
             TryDelete(path);
-            throw new BilibiliParseException($"直播片段过大：{info.Length / 1024 / 1024}MB > {config.BilibiliLiveReplayClipMaxMegabytes}MB。");
+            throw new InvalidOperationException($"直播片段过大：{info.Length / 1024 / 1024}MB > {config.BilibiliLiveReplayClipMaxMegabytes}MB。");
         }
 
         await using var file = File.OpenRead(path);
@@ -536,18 +481,18 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         var ascii = Encoding.ASCII.GetString(header, 0, read);
         if (!ascii.Contains("ftyp", StringComparison.Ordinal))
         {
-            throw new BilibiliParseException("ffmpeg 输出文件不像 MP4，可能截取失败。");
+            throw new InvalidDataException("ffmpeg 输出文件不像 MP4，可能截取失败。");
         }
     }
 
-    private string ResolveClipDirectory(BilibiliLiveParseResult result)
+    private string ResolveClipDirectory(ProviderLiveReplayClipDownloadRequest request)
     {
-        var root = string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliDownloadDirectory)
-            ? Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "bilibili")
-            : Path.IsPathRooted(MyParserRuntime.BilibiliDownloadDirectory)
-                ? MyParserRuntime.BilibiliDownloadDirectory
-                : Path.Combine(AppContext.BaseDirectory, MyParserRuntime.BilibiliDownloadDirectory);
-        return Path.Combine(root, "live-clips", SanitizeFileName(result.RealRoomId, 40));
+        var root = string.IsNullOrWhiteSpace(request.DownloadDirectory)
+            ? Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", request.PlatformId)
+            : Path.IsPathRooted(request.DownloadDirectory)
+                ? request.DownloadDirectory
+                : Path.Combine(AppContext.BaseDirectory, request.DownloadDirectory);
+        return Path.Combine(root, "live-clips", SanitizeFileName(request.MediaId, 40));
     }
 
     private string? ResolveFfmpegPath()
@@ -613,7 +558,7 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
         value = value.ReplaceLineEndings(" ").Trim(' ', '.');
         if (string.IsNullOrWhiteSpace(value))
         {
-            value = "bilibili_live";
+            value = "live";
         }
 
         return value.Length <= maxLength ? value : value[..maxLength];
@@ -683,26 +628,6 @@ internal sealed class BilibiliLiveClipDownloader(PluginConfig config, IProviderH
     private sealed record HlsPlaylist(int Version, int MediaSequence, bool IndependentSegments, string? MapLine, string? KeyLine, List<HlsSegment> Segments);
 
     private sealed record HlsSegment(double DurationSeconds, string Uri, List<string> Tags);
+
+    private sealed record LiveStaticPlaylistResult(string Path, int SelectedSegments, int TotalSegments, double ActualSeconds);
 }
-
-internal sealed record BilibiliLiveClipDownloadResult(
-    string FileUri,
-    string LocalPath,
-    BilibiliLiveStream Stream,
-    int SelectedSegments,
-    int TotalSegments,
-    double ActualSeconds,
-    string PlaylistPath);
-
-internal sealed record BilibiliLiveClipProgress(
-    int SelectedSegments,
-    int TotalSegments,
-    double ActualSeconds,
-    BilibiliLiveStream Stream,
-    string PlaylistPath);
-
-internal sealed record BilibiliLiveStaticPlaylistResult(
-    string Path,
-    int SelectedSegments,
-    int TotalSegments,
-    double ActualSeconds);

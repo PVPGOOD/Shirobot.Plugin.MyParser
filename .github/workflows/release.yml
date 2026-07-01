@@ -38,9 +38,6 @@ jobs:
       - name: Build
         run: dotnet build MyParser.sln --configuration Release --no-restore -p:CopyPluginToHost=false -p:BuildMyParserProvidersOnMainPluginBuild=false -v:minimal
 
-      - name: Publish NetEase provider dependencies
-        run: dotnet publish MyParser.Provider.NetEaseCloudMusic/MyParser.Provider.NetEaseCloudMusic.csproj --configuration Release --no-restore --no-build --output release/netease-publish -p:CopyPluginToHost=false -p:UpdateMyParserMainPluginOnProviderBuild=false -v:minimal
-
       - name: Collect release package
         shell: pwsh
         run: |
@@ -61,7 +58,8 @@ jobs:
           $mainFiles = @(
             "Shirobot.Plugin.MyParser.dll",
             "myparser-sharing.dll",
-            "QrCodeGenerator.dll"
+            "QrCodeGenerator.dll",
+            "SilkSharp.dll"
           )
           foreach ($file in $mainFiles) {
             $source = Join-Path $mainOut $file
@@ -76,13 +74,9 @@ jobs:
             Copy-Item $providerDll $providerRoot -Force
           }
 
-          $netEasePublishOut = Join-Path $PWD "release/netease-publish"
-          $silkSharp = Join-Path $netEasePublishOut "SilkSharp.dll"
-          $silkCodec = Join-Path $netEasePublishOut "runtimes/win-x64/native/silkcodec.dll"
-          if (-not (Test-Path $silkSharp)) { throw "Missing SilkSharp dependency: $silkSharp" }
+          $silkCodec = Join-Path $mainOut "runtimes/win-x64/native/silkcodec.dll"
           if (-not (Test-Path $silkCodec)) { throw "Missing silkcodec native dependency: $silkCodec" }
-          Copy-Item $silkSharp $providerRoot -Force
-          Copy-Item $silkCodec $providerRoot -Force
+          Copy-Item $silkCodec $packageRoot -Force
 
           $providerCount = (Get-ChildItem $providerRoot -Filter "myparser-provider-*.dll" -File).Count
           if ($providerCount -ne 5) {
@@ -98,13 +92,13 @@ jobs:
             (Join-Path $packageRoot "Shirobot.Plugin.MyParser.dll"),
             (Join-Path $packageRoot "myparser-sharing.dll"),
             (Join-Path $packageRoot "QrCodeGenerator.dll"),
+            (Join-Path $packageRoot "SilkSharp.dll"),
+            (Join-Path $packageRoot "silkcodec.dll"),
             (Join-Path $providerRoot "myparser-provider-bilibili.dll"),
             (Join-Path $providerRoot "myparser-provider-douyin.dll"),
             (Join-Path $providerRoot "myparser-provider-xiaohongshu.dll"),
             (Join-Path $providerRoot "myparser-provider-heybox.dll"),
-            (Join-Path $providerRoot "myparser-provider-neteasecloudmusic.dll"),
-            (Join-Path $providerRoot "SilkSharp.dll"),
-            (Join-Path $providerRoot "silkcodec.dll")
+            (Join-Path $providerRoot "myparser-provider-neteasecloudmusic.dll")
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing expected release package file: $path" }

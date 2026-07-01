@@ -16,6 +16,7 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
         <PackageReference Include="Net.Codecrete.QrCodeGenerator" />
+        <PackageReference Include="DrAbc.SilkSharp" />
         <PackageReference Include="ShiroBot.SDK" />
     </ItemGroup>
 

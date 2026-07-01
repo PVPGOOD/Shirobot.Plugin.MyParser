@@ -131,24 +131,37 @@ public interface IProviderHostServices
     string GetMessageScene(IncomingMessage message);
     string GetUriMode(string uri);
     string PreviewUri(string? uri, int maxLength = 180);
-    string RegisterLocalVideoFile(string path);
     void UnregisterLocalVideoFile(string? path);
     void DeleteLocalVideoIfConfigured(PluginConfig config, string? localPath, string provider);
     void CleanupStartupResidues(PluginConfig config);
-    HttpClient CreateImageHttpClient();
-    Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(
-        HttpClient http,
-        string platformName,
-        string? imageUrl,
-        string? referer,
-        string filePrefix,
-        string localDirectory,
-        Action<HttpRequestMessage>? configureRequest = null,
-        long maxBytes = 10 * 1024L * 1024L);
+    Task<ProviderImageBuildResult> BuildProviderImageAsync(
+        ProviderImageBuildRequest request,
+        CancellationToken cancellationToken = default);
+    Task<ProviderLocalVideoSegmentResult> BuildLocalVideoSegmentAsync(
+        PluginConfig config,
+        ProviderLocalVideoSegmentRequest request,
+        CancellationToken cancellationToken = default);
     Task<(string FileUri, string LocalPath)> DownloadProviderVideoAsync(
         PluginConfig config,
         ProviderVideoDownloadRequest request,
         CancellationToken cancellationToken = default);
+    Task<(string FileUri, string LocalPath)> DownloadMuxedProviderVideoAsync(
+        PluginConfig config,
+        ProviderMuxedVideoDownloadRequest request,
+        CancellationToken cancellationToken = default);
+    Task<ProviderLiveReplayClipDownloadResult> DownloadLiveReplayClipAsync(
+        PluginConfig config,
+        ProviderLiveReplayClipDownloadRequest request,
+        CancellationToken cancellationToken = default);
+    Task<(string FileUri, string LocalPath)> DownloadProviderAudioAsync(
+        PluginConfig config,
+        ProviderAudioDownloadRequest request,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProviderRecordVariant>> BuildSilkRecordVariantsAsync(
+        PluginConfig config,
+        ProviderRecordBuildRequest request,
+        CancellationToken cancellationToken = default);
+    Task<string> BuildRecordUriAsync(string localPath, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TResult>> SelectParallelOrderedAsync<TSource, TResult>(
         IEnumerable<TSource> source,
         int maxConcurrency,
@@ -217,6 +230,31 @@ public enum ProviderVideoValidationKind
     Mp4OrWebM,
 }
 
+public sealed record ProviderImageBuildRequest(
+    string PlatformDisplayName,
+    string? ImageUrl,
+    string? Referer,
+    string FilePrefix,
+    Action<HttpRequestMessage>? ConfigureRequest = null,
+    long MaxBytes = 10 * 1024L * 1024L);
+
+public sealed record ProviderImageBuildResult(string Uri, string? LocalPath);
+
+public sealed record ProviderLocalVideoSegmentRequest(
+    string PlatformDisplayName,
+    string MediaId,
+    string LocalPath,
+    string? FileUri,
+    string? ThumbUri = null,
+    string IdentifierName = "media_id");
+
+public sealed record ProviderLocalVideoSegmentResult(
+    VideoOutgoingSegment Segment,
+    string UriMode,
+    string VideoUri,
+    long FileSize,
+    bool RegisteredToHttpServer);
+
 public sealed record ProviderVideoDownloadRequest(
     string PlatformId,
     string PlatformDisplayName,
@@ -229,6 +267,88 @@ public sealed record ProviderVideoDownloadRequest(
     Func<HttpMethod, string, string?, HttpRequestMessage> CreateRequest,
     ProviderVideoValidationKind ValidationKind = ProviderVideoValidationKind.Mp4,
     string IdentifierName = "media_id");
+
+public sealed record ProviderMuxedVideoDownloadRequest(
+    string PlatformId,
+    string PlatformDisplayName,
+    string MediaId,
+    string CacheKeyPrefix,
+    string? Title,
+    string DownloadDirectory,
+    IReadOnlyList<ProviderMuxedMediaStream> VideoStreams,
+    IReadOnlyList<ProviderMuxedMediaStream> AudioStreams,
+    Func<HttpMethod, string, string?, HttpRequestMessage> CreateRequest,
+    string IdentifierName = "media_id");
+
+public sealed record ProviderMuxedMediaStream(
+    string StreamId,
+    string Url,
+    IReadOnlyList<string> BackupUrls,
+    int QualityId,
+    string QualityName,
+    int Width,
+    int Height,
+    double Fps,
+    string CodecName,
+    bool IsAudio)
+{
+    public IEnumerable<string> UrlCandidates => string.IsNullOrWhiteSpace(Url) ? BackupUrls : new[] { Url }.Concat(BackupUrls);
+}
+
+public sealed record ProviderLiveReplayClipDownloadRequest(
+    string PlatformId,
+    string PlatformDisplayName,
+    string MediaId,
+    string DownloadDirectory,
+    IReadOnlyList<ProviderLiveReplayStream> Streams,
+    Func<HttpMethod, string, string?, HttpRequestMessage> CreatePlaylistRequest,
+    Func<HttpMethod, string, string?, HttpRequestMessage> CreateSegmentRequest,
+    Func<ProviderLiveReplayStream, int> StreamRank,
+    string IdentifierName = "room_id");
+
+public sealed record ProviderLiveReplayStream(
+    string Protocol,
+    string Format,
+    string Codec,
+    int CurrentQn,
+    int CdnIndex,
+    string Url);
+
+public sealed record ProviderLiveReplayClipDownloadResult(
+    string FileUri,
+    string LocalPath,
+    ProviderLiveReplayStream Stream,
+    int SelectedSegments,
+    int TotalSegments,
+    double ActualSeconds,
+    string PlaylistPath);
+
+public sealed record ProviderAudioDownloadRequest(
+    string PlatformId,
+    string PlatformDisplayName,
+    string MediaId,
+    string CacheKey,
+    string Url,
+    string DownloadDirectory,
+    string FileNamePrefix,
+    string FileExtension,
+    Func<HttpMethod, string, string?, HttpRequestMessage> CreateRequest,
+    string IdentifierName = "media_id");
+
+public sealed record ProviderRecordBuildRequest(
+    string PlatformId,
+    string PlatformDisplayName,
+    string MediaId,
+    string LocalAudioPath,
+    string FileNamePrefix,
+    bool IncludeMobileBest);
+
+public sealed record ProviderRecordVariant(
+    string Name,
+    string DisplayName,
+    string Description,
+    string Path,
+    int SilkRate);
 
 public sealed record HttpRangeDownloadRequest(
     string Url,

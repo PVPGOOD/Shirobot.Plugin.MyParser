@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Text;
 using ShiroBot.AvaloniaSdk;
-using MyParser.Provider.BiliBili.Downloads;
+using MyParser.Provider.BiliBili.Infrastructure;
 using MyParser.Provider.BiliBili.Services;
 using MyParser.Provider.BiliBili.Models;
 using MyParser.Provider.BiliBili.Views;
+using Shirobot.Plugin.MyParser.Parsing;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
 using ShiroBot.SDK.Plugin;
@@ -26,13 +27,11 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         {
             var clipSeconds = Math.Clamp(config.BilibiliLiveReplayClipSeconds, 3, 3000);
             await ReplyAsync(message, $"正在从当前直播流可回溯分片中截取最近约 {clipSeconds} 秒，请稍候…");
-            var downloader = new BilibiliLiveClipDownloader(config, _hostServices);
-            var clip = await downloader.DownloadRecentClipAsync(result, _ => Task.CompletedTask);
+            var clip = await _hostServices.DownloadLiveReplayClipAsync(config, BuildBilibiliLiveReplayClipDownloadRequest(result));
             result.LocalClipPath = clip.LocalPath;
             result.LocalClipFileUri = clip.FileUri;
             shouldCleanup = true;
-            var videoUri = BuildLocalVideoSegmentUri(clip.LocalPath, result);
-            var segment = new VideoOutgoingSegment(videoUri, string.IsNullOrWhiteSpace(result.CoverUrl) ? null : result.CoverUrl);
+            var segment = await BuildLocalVideoSegmentAsync(clip.LocalPath, clip.FileUri, result);
             await SendLiveClipVideoMessageAsync(message, result, segment, clip.Stream);
         }
         catch (Exception ex)
@@ -49,33 +48,20 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         }
     }
 
-    private string BuildLocalVideoSegmentUri(string localPath, BilibiliLiveParseResult result)
+    private async Task<VideoOutgoingSegment> BuildLocalVideoSegmentAsync(string localPath, string fileUri, BilibiliLiveParseResult result)
     {
-        var fileSize = new FileInfo(localPath).Length;
-        string videoUri;
-        string uriMode;
-        if (config.FileProtocol == VideoSegmentFileProtocol.Base64)
-        {
-            videoUri = "base64://" + Convert.ToBase64String(File.ReadAllBytes(localPath));
-            uriMode = "base64";
-        }
-        else if (config.FileProtocol == VideoSegmentFileProtocol.Http)
-        {
-            videoUri = _hostServices.RegisterLocalVideoFile(localPath);
-            result.LocalClipRegisteredToHttpServer = true;
-            uriMode = "http";
-        }
-        else
-        {
-            videoUri = new Uri(localPath).AbsoluteUri;
-            uriMode = "file";
-        }
-
-        BotLog.Info($"MyParser Bilibili 直播片段 VideoSegment URI 模式：{uriMode}, room_id={result.RealRoomId}, file_mb={fileSize / 1024d / 1024d:F2}, uri_preview={_hostServices.PreviewUri(videoUri)}");
-        return videoUri;
+        var segmentResult = await _hostServices.BuildLocalVideoSegmentAsync(config, new ProviderLocalVideoSegmentRequest(
+            "Bilibili 直播片段",
+            result.RealRoomId,
+            localPath,
+            fileUri,
+            result.CoverUrl,
+            "room_id"));
+        result.LocalClipRegisteredToHttpServer = segmentResult.RegisteredToHttpServer;
+        return segmentResult.Segment;
     }
 
-    private async Task SendLiveClipVideoMessageAsync(IncomingMessage message, BilibiliLiveParseResult result, VideoOutgoingSegment videoSegment, BilibiliLiveStream stream)
+    private async Task SendLiveClipVideoMessageAsync(IncomingMessage message, BilibiliLiveParseResult result, VideoOutgoingSegment videoSegment, ProviderLiveReplayStream stream)
     {
         var stopwatch = Stopwatch.StartNew();
         BotLog.Info($"MyParser Bilibili 直播片段 VideoSegment 发送开始: room_id={result.RealRoomId}, scene={GetMessageScene(message)}, stream={stream.Protocol}/{stream.Format}/{stream.Codec}, qn={stream.CurrentQn}, uri_mode={_hostServices.GetUriMode(videoSegment.Uri)}, uri_preview={_hostServices.PreviewUri(videoSegment.Uri)}");
@@ -101,6 +87,57 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
                 break;
             }
         }
+    }
+
+    private static ProviderLiveReplayClipDownloadRequest BuildBilibiliLiveReplayClipDownloadRequest(BilibiliLiveParseResult result)
+    {
+        return new ProviderLiveReplayClipDownloadRequest(
+            "bilibili",
+            "Bilibili",
+            result.RealRoomId,
+            MyParserRuntime.BilibiliDownloadDirectory,
+            result.Streams.Select(ToProviderLiveReplayStream).ToArray(),
+            (method, url, range) => CreateBilibiliLiveRequest(method, url, result.SourceUrl, range, accept: "application/vnd.apple.mpegurl, application/x-mpegURL, */*", noCache: true),
+            (method, url, range) => CreateBilibiliLiveRequest(method, url, result.SourceUrl, range, accept: "*/*", noCache: false),
+            StreamCompatibilityRank,
+            "room_id");
+    }
+
+    private static ProviderLiveReplayStream ToProviderLiveReplayStream(BilibiliLiveStream stream)
+    {
+        return new ProviderLiveReplayStream(
+            stream.Protocol,
+            stream.Format,
+            stream.Codec,
+            stream.CurrentQn,
+            stream.CdnIndex,
+            stream.Url);
+    }
+
+    private static HttpRequestMessage CreateBilibiliLiveRequest(HttpMethod method, string url, string referer, string? range, string accept, bool noCache)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
+        request.Headers.TryAddWithoutValidation("Referer", string.IsNullOrWhiteSpace(referer) ? "https://live.bilibili.com/" : referer);
+        request.Headers.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
+        request.Headers.TryAddWithoutValidation("Accept", accept);
+        if (noCache)
+        {
+            request.Headers.TryAddWithoutValidation("Cache-Control", "no-cache");
+            request.Headers.TryAddWithoutValidation("Pragma", "no-cache");
+        }
+
+        if (!string.IsNullOrWhiteSpace(range))
+        {
+            request.Headers.TryAddWithoutValidation("Range", range);
+        }
+
+        if (!string.IsNullOrWhiteSpace(MyParserRuntime.BilibiliCookie))
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
+        }
+
+        return request;
     }
 
     private void CleanupLocalLiveClipAfterSend(BilibiliLiveParseResult result)
@@ -174,7 +211,7 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
     {
         var coverTask = BuildRemoteImageAsync(result.CoverUrl, result.SourceUrl, $"bilibili_live_cover_{result.RealRoomId}");
         var avatarTask = context.Render is null
-            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            ? Task.FromResult(new ProviderImageBuildResult(string.Empty, null))
             : BuildRemoteImageAsync(result.AnchorAvatarUrl, result.SourceUrl, $"bilibili_live_avatar_{result.RealRoomId}");
         var coverImage = await coverTask;
         if (context.Render is null)
@@ -302,9 +339,19 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         return $"{stream.Protocol}/{stream.Format}/{stream.Codec} qn={stream.CurrentQn} CDN#{stream.CdnIndex}{accept}";
     }
 
+    private static int StreamCompatibilityRank(ProviderLiveReplayStream stream)
+    {
+        return StreamCompatibilityRank(stream.Protocol, stream.Format, stream.Codec);
+    }
+
     private static int StreamCompatibilityRank(BilibiliLiveStream stream)
     {
-        return (stream.Protocol, stream.Format, stream.Codec) switch
+        return StreamCompatibilityRank(stream.Protocol, stream.Format, stream.Codec);
+    }
+
+    private static int StreamCompatibilityRank(string protocol, string format, string codec)
+    {
+        return (protocol, format, codec) switch
         {
             ("http_hls", "ts", "avc") => 0,
             ("http_hls", "fmp4", "avc") => 1,

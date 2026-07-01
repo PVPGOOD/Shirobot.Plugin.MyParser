@@ -44,7 +44,7 @@ private async Task SendCoverMessageAsync(IncomingMessage message, BilibiliParseR
     {
         var coverTask = BuildRemoteImageAsync(result.CoverUrl, result.SourceUrl, $"bilibili_cover_{result.Bvid}");
         var avatarTask = context.Render is null
-            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            ? Task.FromResult(new ProviderImageBuildResult(string.Empty, null))
             : BuildRemoteImageAsync(result.AuthorAvatarUrl, result.SourceUrl, $"bilibili_avatar_{result.Bvid}");
         var coverImage = await coverTask;
         var coverUri = coverImage.Uri;
@@ -91,15 +91,13 @@ private async Task SendCoverMessageAsync(IncomingMessage message, BilibiliParseR
         }
     }
 
-    private Task<(string Uri, string? LocalPath)> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
+    private Task<ProviderImageBuildResult> BuildRemoteImageAsync(string? imageUrl, string? referer, string filePrefix)
     {
-        return _hostServices.BuildRemoteImageAsync(
-            CoverHttp,
+        return _hostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
             "Bilibili",
             imageUrl,
             referer,
             filePrefix,
-            ResolveCoverDownloadDirectory(),
             request =>
             {
                 request.Headers.TryAddWithoutValidation("User-Agent", BilibiliConstants.UserAgent);
@@ -109,7 +107,7 @@ private async Task SendCoverMessageAsync(IncomingMessage message, BilibiliParseR
                 {
                     request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.BilibiliCookie);
                 }
-            });
+            }));
     }
 
 }

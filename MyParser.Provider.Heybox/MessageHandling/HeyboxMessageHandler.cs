@@ -84,13 +84,11 @@ internal sealed class HeyboxMessageHandler(ProviderMessageHandlerContext context
     private async Task<string> BuildInfoCardUriAsync(HeyboxParseResult result)
     {
         var coverUrl = result.CoverUrl ?? result.ImageUrls.FirstOrDefault();
-        var cover = await HostServices.BuildRemoteImageAsync(
-            HostServices.CreateImageHttpClient(),
+        var cover = await HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
             "小黑盒",
             coverUrl,
             result.SourceUrl,
-            $"heybox_cover_{result.LinkId}",
-            Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "heybox", "images"));
+            $"heybox_cover_{result.LinkId}"));
 
         if (BotContext.Render is null)
         {
@@ -143,13 +141,11 @@ internal sealed class HeyboxMessageHandler(ProviderMessageHandlerContext context
         var downloadedImages = await HostServices.SelectParallelOrderedAsync(
             imageBlocks,
             6,
-            item => HostServices.BuildRemoteImageAsync(
-                HostServices.CreateImageHttpClient(),
+            item => HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
                 "小黑盒文章图片",
                 item.Block.Url,
                 result.SourceUrl,
-                $"heybox_article_{result.LinkId}_{item.ImageIndex:D2}",
-                Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "heybox", "article")));
+                $"heybox_article_{result.LinkId}_{item.ImageIndex:D2}")));
         var imageBySourceIndex = imageBlocks.Zip(downloadedImages, (item, image) => (item.SourceIndex, image))
             .ToDictionary(i => i.SourceIndex, i => i.image);
 
@@ -264,21 +260,16 @@ internal sealed class HeyboxMessageHandler(ProviderMessageHandlerContext context
 
         try
         {
-            var articleImageDirectory = Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser", "heybox", "article");
-            var avatarTask = HostServices.BuildRemoteImageAsync(
-                HostServices.CreateImageHttpClient(),
+            var avatarTask = HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
                 "小黑盒作者头像",
                 result.AuthorAvatarUrl ?? result.CoverUrl ?? result.ImageUrls.FirstOrDefault(),
                 result.SourceUrl,
-                $"heybox_article_avatar_{result.LinkId}",
-                articleImageDirectory);
-            var coverTask = HostServices.BuildRemoteImageAsync(
-                HostServices.CreateImageHttpClient(),
+                $"heybox_article_avatar_{result.LinkId}"));
+            var coverTask = HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
                 "小黑盒文章封面",
                 result.CoverUrl ?? result.ImageUrls.FirstOrDefault(),
                 result.SourceUrl,
-                $"heybox_article_cover_{result.LinkId}",
-                articleImageDirectory);
+                $"heybox_article_cover_{result.LinkId}"));
             var renderBlocks = BuildDocumentBlocksForRender(result).Take(90).ToArray();
             var renderImageBlocks = renderBlocks
                 .Select((block, index) => (Block: block, SourceIndex: index))
@@ -289,13 +280,11 @@ internal sealed class HeyboxMessageHandler(ProviderMessageHandlerContext context
             var renderImages = await HostServices.SelectParallelOrderedAsync(
                 renderImageBlocks,
                 6,
-                item => HostServices.BuildRemoteImageAsync(
-                    HostServices.CreateImageHttpClient(),
+                item => HostServices.BuildProviderImageAsync(new ProviderImageBuildRequest(
                     "小黑盒文档图片",
                     item.Block.Url,
                     result.SourceUrl,
-                    $"heybox_doc_img_{item.ImageIndex:D2}_{result.LinkId}",
-                    articleImageDirectory));
+                    $"heybox_doc_img_{item.ImageIndex:D2}_{result.LinkId}")));
             var renderImageBySourceIndex = renderImageBlocks.Zip(renderImages, (item, image) => (item.SourceIndex, image))
                 .ToDictionary(i => i.SourceIndex, i => i.image);
             var avatarImage = await avatarTask;

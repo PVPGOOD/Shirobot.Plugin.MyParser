@@ -15,7 +15,7 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         var forwarded = new List<OutgoingForwardedMessage>();
         var headerSegments = new List<OutgoingSegment>();
         var coverTask = string.IsNullOrWhiteSpace(result.CoverUrl)
-            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            ? Task.FromResult(new ProviderImageBuildResult(string.Empty, null))
             : BuildRemoteImageAsync(result.CoverUrl, result.MediaUrl ?? result.SeasonUrl, $"bilibili_bangumi_cover_{result.MediaId ?? result.SeasonId ?? result.RequestedEpId ?? 0}");
         var cover = await coverTask;
         if (!string.IsNullOrWhiteSpace(cover.Uri))
@@ -104,7 +104,7 @@ private async Task SendBangumiForwardAsync(IncomingMessage message, BilibiliBang
         var forwarded = new List<OutgoingForwardedMessage>();
         var headerSegments = new List<OutgoingSegment>();
         var headerCoverTask = string.IsNullOrWhiteSpace(result.CoverUrl)
-            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            ? Task.FromResult(new ProviderImageBuildResult(string.Empty, null))
             : BuildRemoteImageAsync(result.CoverUrl, result.SourceUrl, $"bilibili_multipage_cover_{result.Bvid}");
         var headerCover = await headerCoverTask;
         if (!string.IsNullOrWhiteSpace(headerCover.Uri))

@@ -1,10 +1,13 @@
 using System.Diagnostics;
 using System.Text;
+using ShiroBot.AvaloniaSdk;
 using MyParser.Provider.BiliBili.Downloads;
 using MyParser.Provider.BiliBili.Services;
 using MyParser.Provider.BiliBili.Models;
+using MyParser.Provider.BiliBili.Views;
 using ShiroBot.Model.Common;
 using ShiroBot.SDK.Abstractions;
+using ShiroBot.SDK.Plugin;
 
 
 namespace MyParser.Provider.BiliBili.MessageHandling;
@@ -142,63 +145,101 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
 
     private async Task SendLiveForwardAsync(IncomingMessage message, BilibiliLiveParseResult result)
     {
-        var senderId = GetBotOrSenderId(message);
-        var senderName = string.IsNullOrWhiteSpace(result.AnchorName) ? "Bilibili 直播" : result.AnchorName!;
-        var forwarded = new List<OutgoingForwardedMessage>();
-        var headerSegments = new List<OutgoingSegment>();
-
-        if (!string.IsNullOrWhiteSpace(result.CoverUrl))
-        {
-            var cover = await BuildRemoteImageAsync(result.CoverUrl, result.SourceUrl, $"bilibili_live_cover_{result.RealRoomId}");
-            if (!string.IsNullOrWhiteSpace(cover.Uri))
-            {
-                headerSegments.Add(new ImageOutgoingSegment(cover.Uri));
-            }
-        }
-
-        headerSegments.Add(new TextOutgoingSegment(BuildLiveHeaderText(result)));
-        forwarded.Add(new OutgoingForwardedMessage(senderId, senderName, headerSegments));
-
-        if (result.Streams.Count > 0)
-        {
-            foreach (var (stream, index) in result.Streams.Select((stream, index) => (stream, index + 1)))
-            {
-                forwarded.Add(new OutgoingForwardedMessage(senderId, senderName,
-                [
-                    new TextOutgoingSegment(BuildLiveStreamText(stream, index))
-                ]));
-            }
-        }
-        else
-        {
-            forwarded.Add(new OutgoingForwardedMessage(senderId, senderName,
-            [
-                new TextOutgoingSegment("当前未返回可用直播流。")
-            ]));
-        }
-
-        var title = string.IsNullOrWhiteSpace(result.Title) ? $"Bilibili 直播 {result.RealRoomId}" : TrimLine(result.Title!, 48);
-        var preview = new[]
-        {
-            $"房间 {result.RealRoomId}",
-            FormatLiveStatus(result.LiveStatus),
-            result.Streams.Count > 0 ? $"播放流 {result.Streams.Count} 条" : "无播放流",
-        };
-        var summary = $"{FormatLiveStatus(result.LiveStatus)} · {result.Streams.Count} 条播放流";
-        var forward = new ForwardOutgoingSegment(forwarded, title, preview, summary, "Bilibili 直播");
+        var cardUri = await BuildLiveCardUriAsync(result);
+        var segment = new ImageOutgoingSegment(cardUri);
+        var stopwatch = Stopwatch.StartNew();
+        BotLog.Info($"MyParser Bilibili 直播卡片 ImageSegment 发送开始: room_id={result.RealRoomId}, scene={GetMessageScene(message)}, uri_preview={_hostServices.PreviewUri(cardUri)}");
 
         switch (message)
         {
             case GroupIncomingMessage group:
-                await context.Message.SendGroupMessageAsync(group.Group.GroupId, forward);
+            {
+                var response = await context.Message.SendGroupMessageAsync(group.Group.GroupId, segment);
+                BotLog.Info($"MyParser Bilibili 直播卡片 ImageSegment 发送接口完成: room_id={result.RealRoomId}, scene=group, group_id={group.Group.GroupId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
                 break;
+            }
             case FriendIncomingMessage friend:
-                await context.Message.SendPrivateMessageAsync(friend.SenderId, forward);
+            {
+                var response = await context.Message.SendPrivateMessageAsync(friend.SenderId, segment);
+                BotLog.Info($"MyParser Bilibili 直播卡片 ImageSegment 发送接口完成: room_id={result.RealRoomId}, scene=friend, user_id={friend.SenderId}, message_seq={response.MessageSeq}, elapsed={stopwatch.Elapsed:mm\\:ss}");
                 break;
+            }
             default:
-                await context.Message.ReplyAsync(message, forward);
+                await context.Message.ReplyAsync(message, segment);
                 break;
         }
+    }
+
+    private async Task<string> BuildLiveCardUriAsync(BilibiliLiveParseResult result)
+    {
+        var coverTask = BuildRemoteImageAsync(result.CoverUrl, result.SourceUrl, $"bilibili_live_cover_{result.RealRoomId}");
+        var avatarTask = context.Render is null
+            ? Task.FromResult<(string Uri, string? LocalPath)>((string.Empty, null))
+            : BuildRemoteImageAsync(result.AnchorAvatarUrl, result.SourceUrl, $"bilibili_live_avatar_{result.RealRoomId}");
+        var coverImage = await coverTask;
+        if (context.Render is null)
+        {
+            BotLog.Warning($"MyParser Bilibili Avalonia 渲染服务不可用，直接发送直播封面: room_id={result.RealRoomId}");
+            return coverImage.Uri;
+        }
+
+        try
+        {
+            var avatarImage = await avatarTask;
+            var coverBitmap = !string.IsNullOrWhiteSpace(coverImage.LocalPath)
+                ? _hostServices.DecodeImageFileForRender(coverImage.LocalPath)
+                : _hostServices.DecodeBase64ImageForRender(coverImage.Uri);
+            var avatarBitmap = !string.IsNullOrWhiteSpace(avatarImage.LocalPath)
+                ? _hostServices.DecodeImageFileForRender(avatarImage.LocalPath)
+                : _hostServices.DecodeBase64ImageForRender(avatarImage.Uri);
+            var vm = new BiliLiveCardViewModel
+            {
+                Cover = coverBitmap,
+                Avatar = avatarBitmap,
+                KindText = "Bilibili 直播",
+                StatusText = FormatLiveStatus(result.LiveStatus),
+                RoomIdText = $"房间：{result.RealRoomId}",
+                Title = string.IsNullOrWhiteSpace(result.Title) ? "Bilibili 直播" : TrimLine(result.Title!, 80),
+                AnchorName = string.IsNullOrWhiteSpace(result.AnchorName) ? "未知主播" : result.AnchorName,
+                AudienceText = BuildLiveAudienceText(result),
+                WatchedText = BuildLiveWatchedText(result),
+                LiveStartTimeText = result.LiveStartTime is null ? "未知" : result.LiveStartTime.Value.ToString("yyyy-MM-dd HH:mm:ss"),
+                LiveDurationText = result.LiveDuration is null ? "未知" : FormatDuration(result.LiveDuration.Value),
+            };
+            var png = await context.RenderControlPngAsync<BiliLiveCard>(vm, new ControlRenderOptions(RenderTheme.Auto));
+            BotLog.Info($"MyParser Bilibili 直播卡片渲染完成: room_id={result.RealRoomId}, cover_url={result.CoverUrl}, png_kb={png.Length / 1024d:F1}, view={typeof(BiliLiveCard).FullName}, mode=base64");
+            return "base64://" + Convert.ToBase64String(png);
+        }
+        catch (Exception ex)
+        {
+            BotLog.Warning($"MyParser Bilibili 直播卡片渲染失败，直接发送直播封面: room_id={result.RealRoomId}, cover_url={result.CoverUrl}, error={ex.Message}");
+            return coverImage.Uri;
+        }
+    }
+
+    private static string BuildOfficialLivePlayerUrl(BilibiliLiveParseResult result)
+    {
+        return $"https://www.bilibili.com/blackboard/live/live-activity-player.html?enterTheRoom=0&cid={result.RealRoomId}";
+    }
+
+    private static string BuildLiveAudienceText(BilibiliLiveParseResult result)
+    {
+        return !string.IsNullOrWhiteSpace(result.RoomAudienceText)
+            ? result.RoomAudienceText
+            : result.RoomAudienceCount > 0
+                ? FormatCount(result.RoomAudienceCount)
+                : "未知";
+    }
+
+    private static string BuildLiveWatchedText(BilibiliLiveParseResult result)
+    {
+        return !string.IsNullOrWhiteSpace(result.WatchedText)
+            ? result.WatchedText
+            : result.WatchedCount > 0
+                ? FormatCount(result.WatchedCount)
+                : result.OnlineCount > 0
+                    ? FormatCount(result.OnlineCount)
+                    : "未知";
     }
 
     private static string BuildLiveHeaderText(BilibiliLiveParseResult result)
@@ -216,9 +257,6 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
         else if (result.OnlineCount > 0) sb.AppendLine($"人气值：{FormatCount(result.OnlineCount)}");
         if (result.LiveStartTime is not null) sb.AppendLine($"开播时间：{result.LiveStartTime:yyyy-MM-dd HH:mm:ss}");
         if (result.LiveDuration is not null) sb.AppendLine($"直播时长：{FormatDuration(result.LiveDuration.Value)}");
-        if (!string.IsNullOrWhiteSpace(result.SourceUrl)) sb.AppendLine($"链接：{result.SourceUrl}");
-        sb.AppendLine($"播放流：{result.Streams.Count} 条，见后续转发节点。");
-        AppendRecommendedLiveStreams(sb, result);
         return sb.ToString().TrimEnd();
     }
 
@@ -299,7 +337,6 @@ private async Task TrySendLiveReplayClipAsync(IncomingMessage message, BilibiliL
             sb.AppendLine("可选 qn：" + string.Join(", ", stream.AcceptQn));
         }
 
-        sb.AppendLine(stream.Url);
         return sb.ToString().TrimEnd();
     }
 

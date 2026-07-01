@@ -14,6 +14,8 @@ public sealed class BilibiliLiveParseResult
 
     public string? AnchorName { get; init; }
 
+    public string? AnchorAvatarUrl { get; init; }
+
     public string? CoverUrl { get; init; }
 
     public long OnlineCount { get; init; }

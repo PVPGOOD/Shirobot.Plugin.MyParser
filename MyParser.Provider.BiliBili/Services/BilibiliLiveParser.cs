@@ -83,6 +83,7 @@ public sealed class BilibiliLiveParser(HttpClient http, PluginConfig config)
             LiveStatus = liveStatus == 0 ? infoRoomInfo?.GetInt32OrDefault("live_status") ?? 0 : liveStatus,
             Title = FirstNonEmpty(infoRoomInfo?.GetStringOrDefault("title"), playRoomInfo?.GetStringOrDefault("title")),
             AnchorName = FirstNonEmpty(anchorInfo?.GetStringOrDefault("uname"), playRoomInfo?.GetPropertyOrDefault("anchor_info")?.GetPropertyOrDefault("base_info")?.GetStringOrDefault("uname")),
+            AnchorAvatarUrl = FirstNonEmpty(anchorInfo?.GetStringOrDefault("face"), playRoomInfo?.GetPropertyOrDefault("anchor_info")?.GetPropertyOrDefault("base_info")?.GetStringOrDefault("face")),
             CoverUrl = FirstNonEmpty(
                 infoRoomInfo?.GetStringOrDefault("cover"),
                 infoRoomInfo?.GetStringOrDefault("user_cover"),

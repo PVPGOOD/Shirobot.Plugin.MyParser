@@ -12,8 +12,7 @@ public sealed class BilibiliArticleParseProvider(BilibiliParser parser) : IParse
 
     public bool CanHandle(string text)
     {
-        return Utilities.BilibiliUrlParser.ExtractStrictBilibiliUrl(text) is not null
-               || Utilities.BilibiliUrlParser.ExtractCvid(text) is not null
+        return Utilities.BilibiliUrlParser.ExtractCvid(text) is not null
                || Utilities.BilibiliUrlParser.ExtractOpusId(text) is not null
                || Utilities.BilibiliUrlParser.ExtractB23Url(text) is not null;
     }

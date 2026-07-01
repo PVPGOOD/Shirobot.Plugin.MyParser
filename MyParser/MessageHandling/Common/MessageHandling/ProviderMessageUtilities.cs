@@ -133,7 +133,7 @@ internal static class ProviderMessageUtilities
         return Path.Combine(cookieDirectory, Path.GetFileName(fileName));
     }
 
-    public static async Task<string> UploadLocalVideoFileAsync(
+    public static Task<string> UploadLocalVideoFileAsync(
         IBotContext context,
         PluginConfig config,
         IncomingMessage message,
@@ -141,16 +141,30 @@ internal static class ProviderMessageUtilities
         string platformName,
         string mediaId)
     {
-        if (string.IsNullOrWhiteSpace(localVideoPath) || !File.Exists(localVideoPath))
+        return UploadLocalFileAsync(context, config, message, localVideoPath, platformName, mediaId);
+    }
+
+    public static async Task<string> UploadLocalFileAsync(
+        IBotContext context,
+        PluginConfig config,
+        IncomingMessage message,
+        string? localFilePath,
+        string platformName,
+        string mediaId,
+        bool preferBase64 = false)
+    {
+        if (string.IsNullOrWhiteSpace(localFilePath) || !File.Exists(localFilePath))
         {
-            throw new InvalidOperationException("本地视频文件不存在。");
+            throw new InvalidOperationException("本地文件不存在。");
         }
 
-        var localPath = Path.GetFullPath(localVideoPath);
+        var localPath = Path.GetFullPath(localFilePath);
         var fileSize = new FileInfo(localPath).Length;
-        var fileUri = new Uri(localPath).AbsoluteUri;
+        var uploadMode = preferBase64 ? "base64" : "file";
+        var fileUri = preferBase64
+            ? "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(localPath))
+            : new Uri(localPath).AbsoluteUri;
         var fileName = Path.GetFileName(localPath);
-        const string uploadMode = "file";
         var stopwatch = Stopwatch.StartNew();
 
         BotLog.Info($"MyParser {platformName} 文件上传开始: media_id={mediaId}, mode={uploadMode}, file_mb={fileSize / 1024d / 1024d:F2}, file={localPath}");

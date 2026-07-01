@@ -14,6 +14,8 @@ internal static class MyParserRuntime
 
     public static string XiaohongshuCookie { get; set; } = string.Empty;
 
+    public static string NetEaseCloudMusicCookie { get; set; } = string.Empty;
+
     public static string DownloadDirectory { get; set; } = string.Empty;
 
     public static string BilibiliDownloadDirectory { get; set; } = string.Empty;
@@ -54,6 +56,7 @@ internal static class MyParserRuntime
         DouyinCookie = string.Empty;
         BilibiliCookie = string.Empty;
         XiaohongshuCookie = string.Empty;
+        NetEaseCloudMusicCookie = string.Empty;
         DownloadDirectory = string.Empty;
         BilibiliDownloadDirectory = string.Empty;
         XiaohongshuDownloadDirectory = string.Empty;

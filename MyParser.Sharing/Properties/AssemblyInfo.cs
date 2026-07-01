@@ -4,3 +4,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("myparser-provider-bilibili")]
 [assembly: InternalsVisibleTo("myparser-provider-douyin")]
 [assembly: InternalsVisibleTo("myparser-provider-xiaohongshu")]
+[assembly: InternalsVisibleTo("myparser-provider-neteasecloudmusic")]

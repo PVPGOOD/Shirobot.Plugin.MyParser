@@ -8,5 +8,6 @@
     <PackageVersion Include="ShiroBot.AvaloniaSdk" Version="0.6.0" />
     <PackageVersion Include="ILRepack.Lib.MSBuild.Task" Version="2.0.45" />
     <PackageVersion Include="Net.Codecrete.QrCodeGenerator" Version="3.0.0" />
+    <PackageVersion Include="DrAbc.SilkSharp" Version="2.0.8" />
   </ItemGroup>
 </Project>

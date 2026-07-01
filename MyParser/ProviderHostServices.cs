@@ -49,6 +49,11 @@ internal sealed class ProviderHostServices(IBotContext context) : IProviderHostS
         return ProviderMessageUtilities.UploadLocalVideoFileAsync(context, config, message, localVideoPath, platformName, mediaId);
     }
 
+    public Task<string> UploadLocalFileAsync(PluginConfig config, IncomingMessage message, string? localPath, string platformName, string mediaId, bool preferBase64 = false)
+    {
+        return ProviderMessageUtilities.UploadLocalFileAsync(context, config, message, localPath, platformName, mediaId, preferBase64);
+    }
+
     public string GetMessageScene(IncomingMessage message) => ProviderMessageUtilities.GetMessageScene(message);
 
     public string GetUriMode(string uri) => MediaUriUtilities.GetUriMode(uri);

@@ -584,6 +584,7 @@ public sealed class MyParserPlugin : PluginBase
         MyParserRuntime.DouyinCookie = string.Empty;
         MyParserRuntime.BilibiliCookie = string.Empty;
         MyParserRuntime.XiaohongshuCookie = string.Empty;
+        MyParserRuntime.NetEaseCloudMusicCookie = string.Empty;
 
         MyParserRuntime.DownloadDirectory = Path.Combine(pluginDir, "tmp", "douyin");
         MyParserRuntime.BilibiliDownloadDirectory = Path.Combine(pluginDir, "tmp", "bilibili");

@@ -20,6 +20,12 @@ public sealed class PluginConfig
     [ConfigField("是否自动解析聊天中的小红书链接。", Label = "自动解析小红书链接")]
     public bool AutoParseXiaohongshuLinks { get; set; } = false;
 
+    [ConfigField("是否自动解析聊天中的网易云音乐歌曲链接。", Label = "自动解析网易云音乐链接")]
+    public bool AutoParseNetEaseCloudMusicLinks { get; set; } = true;
+
+    [ConfigField("发送网易云音乐语音时是否额外发送手机高音质版。关闭时默认只发送电脑兼容版。", Label = "网易云额外发送手机高音质语音")]
+    public bool SendNetEaseMobileBestRecord { get; set; } = false;
+
     [ConfigField("手动解析命令前缀，例如 #parse <链接>。", Label = "解析命令前缀", Placeholder = "#parse")]
     public string ParseCommandPrefix { get; set; } = "#parse";
 

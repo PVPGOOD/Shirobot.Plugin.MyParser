@@ -127,6 +127,7 @@ public interface IProviderHostServices
     Task RunLoggedBackgroundAsync(string description, Func<Task> action);
     string ResolveCookiePath(string fileName);
     Task<string> UploadLocalVideoFileAsync(PluginConfig config, IncomingMessage message, string? localVideoPath, string platformName, string mediaId);
+    Task<string> UploadLocalFileAsync(PluginConfig config, IncomingMessage message, string? localPath, string platformName, string mediaId, bool preferBase64 = false);
     string GetMessageScene(IncomingMessage message);
     string GetUriMode(string uri);
     string PreviewUri(string? uri, int maxLength = 180);

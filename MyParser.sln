@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Shirobot.Plugin.MyParser", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyParser.Provider.Heybox", "MyParser.Provider.Heybox\MyParser.Provider.Heybox.csproj", "{0CE9F6B3-A97B-434B-B554-9E3A03D9FAE3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyParser.Provider.NetEaseCloudMusic", "MyParser.Provider.NetEaseCloudMusic\MyParser.Provider.NetEaseCloudMusic.csproj", "{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -99,6 +101,18 @@ Global
 		{0CE9F6B3-A97B-434B-B554-9E3A03D9FAE3}.Release|x64.Build.0 = Release|Any CPU
 		{0CE9F6B3-A97B-434B-B554-9E3A03D9FAE3}.Release|x86.ActiveCfg = Release|Any CPU
 		{0CE9F6B3-A97B-434B-B554-9E3A03D9FAE3}.Release|x86.Build.0 = Release|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Debug|x64.Build.0 = Debug|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Debug|x86.Build.0 = Debug|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x64.ActiveCfg = Release|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x64.Build.0 = Release|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x86.ActiveCfg = Release|Any CPU
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -108,5 +122,6 @@ Global
 		{0E4B9C51-CE2E-4FAB-BEDD-2C0F31296B62} = {65DF2368-2C2A-4D9C-A0C7-6C3865122B37}
 		{6FCD5D53-52EC-44B6-BB6B-8CE589B12D3C} = {65DF2368-2C2A-4D9C-A0C7-6C3865122B37}
 		{0CE9F6B3-A97B-434B-B554-9E3A03D9FAE3} = {65DF2368-2C2A-4D9C-A0C7-6C3865122B37}
+		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764} = {65DF2368-2C2A-4D9C-A0C7-6C3865122B37}
 	EndGlobalSection
 EndGlobal

@@ -2,6 +2,8 @@
 
 <p><strong><span style="font-size: 2.2em;">Shirobot.Plugin.MyParser</span></strong></p>
 
+<p><img src="./Assets/icon.png" alt="Shirobot.Plugin.MyParser icon" width="260" /></p>
+
 <p><em>一个面向 <a href="https://github.com/ShirokaProject/ShiroBot">ShiroBot</a> 的多平台内容解析与转发插件。</em></p>
 
 </div>

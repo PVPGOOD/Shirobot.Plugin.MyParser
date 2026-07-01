@@ -17,7 +17,8 @@ public sealed class DouyinParseProvider(DouyinParser parser) : IParseProviderWit
     public async Task<ProviderLoginStatus> CheckLoginStatusAsync(CancellationToken cancellationToken = default)
     {
         var message = await Parser.CheckLoginStatusAsync(cancellationToken);
-        var isLogin = message.Contains("有效/已登录", StringComparison.OrdinalIgnoreCase);
+        var isLogin = message.Contains("有效/已登录", StringComparison.OrdinalIgnoreCase)
+                      || message.Contains("游客 Cookie", StringComparison.OrdinalIgnoreCase);
         return new ProviderLoginStatus(isLogin, null, null, message);
     }
 

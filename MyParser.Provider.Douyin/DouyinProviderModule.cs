@@ -20,7 +20,7 @@ public sealed class DouyinProviderModule : MyParserProviderModuleBase, IProvider
             cookie => MyParserRuntime.DouyinCookie = cookie,
             LooksLikeCookie,
             EmptyHint: "可编辑文件后重启或等待热重载。",
-            InvalidHint: "请确保文件内容是浏览器 Request Headers 中 Cookie: 后面的完整值。")
+            InvalidHint: "请确保文件内容是浏览器 Request Headers 中 Cookie: 后面的完整值；未登录游客 Cookie 也可用，但至少需要包含 UIFID/UIFID_TEMP 或 ttwid 等浏览器安全态字段。")
     ];
 
     public override IReadOnlyList<IParseProvider> CreateProviders(PluginConfig config)
@@ -35,9 +35,22 @@ public sealed class DouyinProviderModule : MyParserProviderModuleBase, IProvider
 
     public bool LooksLikeCookie(string cookie)
     {
-        return cookie.Contains("sessionid=", StringComparison.OrdinalIgnoreCase)
-               && cookie.Contains("ttwid=", StringComparison.OrdinalIgnoreCase)
-               && cookie.Contains(';');
+        if (string.IsNullOrWhiteSpace(cookie) || !cookie.Contains(';'))
+        {
+            return false;
+        }
+
+        // 抖音游客 Cookie 没有 sessionid，但 detail 接口签名依赖浏览器安全态。
+        // 因此允许未登录游客 Cookie，只要包含 UIFID/UIFID_TEMP 或 ttwid 等关键字段。
+        var hasLoginSession = cookie.Contains("sessionid=", StringComparison.OrdinalIgnoreCase)
+                              && cookie.Contains("ttwid=", StringComparison.OrdinalIgnoreCase);
+        var hasVisitorSecurityState = cookie.Contains("UIFID=", StringComparison.OrdinalIgnoreCase)
+                                      || cookie.Contains("UIFID_TEMP=", StringComparison.OrdinalIgnoreCase)
+                                      || cookie.Contains("ttwid=", StringComparison.OrdinalIgnoreCase)
+                                      || cookie.Contains("x-web-secsdk-uid=", StringComparison.OrdinalIgnoreCase)
+                                      || cookie.Contains("__security_mc_1_s_sdk_crypt_sdk=", StringComparison.OrdinalIgnoreCase)
+                                      || cookie.Contains("bd_ticket_guard_client_data=", StringComparison.OrdinalIgnoreCase);
+        return hasLoginSession || hasVisitorSecurityState;
     }
 
     public bool IsAutoParseEnabled(PluginConfig config) => config.AutoParseDouyinLinks;

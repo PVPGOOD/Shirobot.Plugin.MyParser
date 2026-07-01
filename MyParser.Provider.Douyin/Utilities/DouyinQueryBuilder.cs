@@ -54,6 +54,51 @@ public static class DouyinQueryBuilder
         return Build(pairs);
     }
 
+    public static string BuildHjDetailQuery(string awemeId, string? msToken = null, string? webId = null, string? uifid = null, string? verifyFp = null)
+    {
+        var fp = string.IsNullOrWhiteSpace(verifyFp) ? GenerateVerifyFp() : verifyFp;
+        var pairs = new Dictionary<string, string?>
+        {
+            ["device_platform"] = "webapp",
+            ["aid"] = "6383",
+            ["channel"] = "channel_pc_web",
+            ["aweme_id"] = awemeId,
+            ["request_source"] = "600",
+            ["origin_type"] = "video_page",
+            ["update_version_code"] = "170400",
+            ["pc_client_type"] = "1",
+            ["pc_libra_divert"] = "Windows",
+            ["support_h265"] = "1",
+            ["support_dash"] = "0",
+            ["cpu_core_num"] = "8",
+            ["version_code"] = "190500",
+            ["version_name"] = "19.5.0",
+            ["cookie_enabled"] = "true",
+            ["screen_width"] = "1920",
+            ["screen_height"] = "1080",
+            ["browser_language"] = "en-US",
+            ["browser_platform"] = "Win32",
+            ["browser_name"] = "Chrome",
+            ["browser_version"] = "146.0.0.0",
+            ["browser_online"] = "true",
+            ["engine_name"] = "Blink",
+            ["engine_version"] = "146.0.0.0",
+            ["os_name"] = "Windows",
+            ["os_version"] = "10",
+            ["device_memory"] = "8",
+            ["platform"] = "PC",
+            ["downlink"] = "9.3",
+            ["effective_type"] = "4g",
+            ["round_trip_time"] = "0",
+            ["webid"] = string.IsNullOrWhiteSpace(webId) ? GenerateNumericId() : webId,
+            ["uifid"] = string.IsNullOrWhiteSpace(uifid) ? string.Empty : uifid,
+            ["verifyFp"] = fp,
+            ["fp"] = fp,
+            ["msToken"] = string.IsNullOrWhiteSpace(msToken) ? GenerateMsTokenFallback() : msToken,
+        };
+        return Build(pairs);
+    }
+
     private static Dictionary<string, string?> CreateCommonWebPairs()
     {
         return new Dictionary<string, string?>
@@ -93,5 +138,51 @@ public static class DouyinQueryBuilder
     private static string Build(Dictionary<string, string?> pairs)
     {
         return string.Join("&", pairs.Select(kv => $"{HttpUtility.UrlEncode(kv.Key)}={HttpUtility.UrlEncode(kv.Value ?? string.Empty)}"));
+    }
+
+    private static string GenerateVerifyFp()
+    {
+        const string chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        var milliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var base36 = ToBase36(milliseconds);
+        var random = new char[36];
+        for (var i = 0; i < random.Length; i++)
+        {
+            random[i] = chars[Random.Shared.Next(chars.Length)];
+        }
+
+        random[8] = random[13] = random[18] = random[23] = '_';
+        random[14] = '4';
+        random[19] = chars[(chars.ToString().IndexOf(random[19]) & 3) | 8];
+        return "verify_" + base36 + "_" + new string(random);
+    }
+
+    private static string ToBase36(long value)
+    {
+        const string chars = "0123456789abcdefghijklmnopqrstuvwxyz";
+        if (value == 0)
+        {
+            return "0";
+        }
+
+        var result = string.Empty;
+        while (value > 0)
+        {
+            result = chars[(int)(value % 36)] + result;
+            value /= 36;
+        }
+
+        return result;
+    }
+
+    private static string GenerateNumericId()
+    {
+        return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() + Random.Shared.Next(100000, 999999).ToString();
+    }
+
+    private static string GenerateMsTokenFallback()
+    {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        return new string(Enumerable.Range(0, 182).Select(_ => chars[Random.Shared.Next(chars.Length)]).ToArray());
     }
 }

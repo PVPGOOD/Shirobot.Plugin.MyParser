@@ -13,10 +13,20 @@ public sealed class DouyinLoginStatusChecker(HttpClient http)
             return "未配置 Cookie";
         }
 
-        if (!MyParserRuntime.DouyinCookie.Contains("sessionid=", StringComparison.OrdinalIgnoreCase)
-            || !MyParserRuntime.DouyinCookie.Contains("ttwid=", StringComparison.OrdinalIgnoreCase))
+        var hasSession = MyParserRuntime.DouyinCookie.Contains("sessionid=", StringComparison.OrdinalIgnoreCase);
+        var hasTtwid = MyParserRuntime.DouyinCookie.Contains("ttwid=", StringComparison.OrdinalIgnoreCase);
+        var hasUifid = MyParserRuntime.DouyinCookie.Contains("UIFID=", StringComparison.OrdinalIgnoreCase)
+                       || MyParserRuntime.DouyinCookie.Contains("UIFID_TEMP=", StringComparison.OrdinalIgnoreCase);
+        if (!hasSession)
         {
-            return "Cookie 格式可能无效：缺少 sessionid 或 ttwid";
+            return hasUifid || hasTtwid
+                ? $"游客 Cookie / 未登录; has_uifid={hasUifid}; has_ttwid={hasTtwid}; cookie_length={MyParserRuntime.DouyinCookie.Length}"
+                : $"Cookie 格式可能无效：缺少 sessionid，且未找到 UIFID/UIFID_TEMP/ttwid; cookie_length={MyParserRuntime.DouyinCookie.Length}";
+        }
+
+        if (!hasTtwid)
+        {
+            return $"登录 Cookie 可能不完整：缺少 ttwid; has_uifid={hasUifid}; cookie_length={MyParserRuntime.DouyinCookie.Length}";
         }
 
         var url = "https://www.douyin.com/webcast/user/me/?aid=1128&t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

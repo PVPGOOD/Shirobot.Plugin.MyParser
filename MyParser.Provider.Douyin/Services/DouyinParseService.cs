@@ -1,5 +1,6 @@
 using MyParser.Provider.Douyin.Infrastructure;
 using MyParser.Provider.Douyin.Models;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ShiroBot.SDK.Abstractions;
@@ -56,38 +57,101 @@ public sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWor
             ? $"https://www.douyin.com/note/{awemeId}"
             : $"https://www.douyin.com/video/{awemeId}";
 
-        var query = BuildDetailQuery(awemeId);
+        var uifid = TryGetCookieValue("UIFID") ?? TryGetCookieValue("UIFID_TEMP");
+        var msToken = TryGetCookieValue("msToken");
+        var verifyFp = TryGetCookieValue("s_v_web_id") ?? TryGetCookieValue("verifyFp") ?? TryGetCookieValue("fp");
+        if (string.IsNullOrWhiteSpace(uifid))
+        {
+            BotLog.Warning("MyParser 抖音 Cookie 缺少 UIFID/UIFID_TEMP，无法生成 x-secsdk-web-signature，详情接口会被判定为 anonymous 强制登录。请从已打开抖音页面的浏览器 Cookie 中复制完整 DouyinCookie。");
+        }
+        else if (string.IsNullOrWhiteSpace(msToken) || string.IsNullOrWhiteSpace(verifyFp))
+        {
+            BotLog.Warning($"MyParser 抖音游客 Cookie 安全态不完整: has_uifid=True, has_msToken={!string.IsNullOrWhiteSpace(msToken)}, has_verifyFp={!string.IsNullOrWhiteSpace(verifyFp)}。可能触发 CUSTOM_强登_模型，请从 Network 请求 Cookie 中复制包含 msToken 和 s_v_web_id/verifyFp 的完整值。");
+        }
+
+        var query = BuildHjDetailQuery(
+            awemeId,
+            msToken,
+            await GetWebIdAsync(referer, cancellationToken),
+            uifid,
+            verifyFp);
         var unsignedUrl = "https://www.douyin.com/aweme/v1/web/aweme/detail/?" + query;
         var aBogus = ABogusSigner.Generate(query, DouyinConstants.UserAgent);
-        var signedUrl = unsignedUrl + "&a_bogus=" + Uri.EscapeDataString(aBogus);
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var signedUrl = unsignedUrl + "&a_bogus=" + Uri.EscapeDataString(aBogus) + "&timestamp=" + timestamp;
+        signedUrl = WebSecSdkSigner.SignUrl(signedUrl, uifid);
+        var hjSignedUrl = signedUrl.Replace("https://www.douyin.com/", "https://www-hj.douyin.com/", StringComparison.OrdinalIgnoreCase);
 
-        var doc = await GetJsonAsync(signedUrl, referer, cancellationToken);
-        if (TryGetAwemeDetail(doc.RootElement, out _))
+        var doc = await TryGetAwemeDetailJsonAsync(signedUrl, referer, awemeId, "detail-video", cancellationToken, uifid);
+        if (doc is not null)
         {
             return doc;
         }
 
-        doc.Dispose();
+        doc = await TryGetAwemeDetailJsonAsync(hjSignedUrl, referer, awemeId, "detail-video-hj", cancellationToken, uifid);
+        if (doc is not null)
+        {
+            return doc;
+        }
 
         if (!referer.Contains("/note/", StringComparison.OrdinalIgnoreCase))
         {
-            doc = await GetJsonAsync(signedUrl, $"https://www.douyin.com/note/{awemeId}", cancellationToken);
+            var noteReferer = $"https://www.douyin.com/note/{awemeId}";
+            doc = await TryGetAwemeDetailJsonAsync(signedUrl, noteReferer, awemeId, "detail-note", cancellationToken, uifid);
+            if (doc is not null)
+            {
+                return doc;
+            }
+
+            doc = await TryGetAwemeDetailJsonAsync(hjSignedUrl, noteReferer, awemeId, "detail-note-hj", cancellationToken, uifid);
+            if (doc is not null)
+            {
+                return doc;
+            }
+        }
+
+        try
+        {
+            var ssrDoc = await FetchSharePageDataAsync(awemeId, cancellationToken);
+            if (TryGetAwemeDetail(ssrDoc.RootElement, out _))
+            {
+                return ssrDoc;
+            }
+
+            ssrDoc.Dispose();
+        }
+        catch (DouyinParseException ex)
+        {
+            BotLog.Warning($"MyParser 抖音分享页备用解析失败: aweme_id={awemeId}, error={ex.Message}");
+        }
+
+        if (string.IsNullOrWhiteSpace(uifid))
+        {
+            throw new DouyinParseException("DouyinCookie 缺少 UIFID 或 UIFID_TEMP，无法生成 x-secsdk-web-signature，抖音详情接口返回强制登录。请在浏览器打开抖音页面后复制完整 Cookie（至少包含 UIFID/UIFID_TEMP、msToken、s_v_web_id）再重试。");
+        }
+
+        throw new DouyinParseException("抖音详情接口和分享页均未返回作品数据。请检查 Cookie 是否有效，或稍后重试。");
+    }
+
+    private async Task<JsonDocument?> TryGetAwemeDetailJsonAsync(string signedUrl, string referer, string awemeId, string source, CancellationToken cancellationToken, string? uifid)
+    {
+        try
+        {
+            var doc = await GetJsonAsync(signedUrl, referer, cancellationToken, uifid);
             if (TryGetAwemeDetail(doc.RootElement, out _))
             {
                 return doc;
             }
 
+            BotLog.Warning($"MyParser 抖音详情接口响应缺少作品数据: aweme_id={awemeId}, source={source}");
             doc.Dispose();
         }
-
-        var ssrDoc = await FetchSharePageDataAsync(awemeId, cancellationToken);
-        if (TryGetAwemeDetail(ssrDoc.RootElement, out _))
+        catch (DouyinParseException ex)
         {
-            return ssrDoc;
+            BotLog.Warning($"MyParser 抖音详情接口失败，尝试备用解析: aweme_id={awemeId}, source={source}, error={ex.Message}");
         }
 
-        ssrDoc.Dispose();
-        throw new DouyinParseException("抖音详情接口和分享页均未返回作品数据。请检查 Cookie 是否有效，或稍后重试。");
+        return null;
     }
 
     private async Task<JsonDocument> FetchSharePageDataAsync(string awemeId, CancellationToken cancellationToken)
@@ -233,6 +297,78 @@ public sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWor
         }
     }
 
+    private static string? TryGetCookieValue(string name)
+    {
+        if (string.IsNullOrWhiteSpace(MyParserRuntime.DouyinCookie))
+        {
+            return null;
+        }
+
+        foreach (var part in MyParserRuntime.DouyinCookie.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var index = part.IndexOf('=');
+            if (index <= 0)
+            {
+                continue;
+            }
+
+            if (string.Equals(part[..index].Trim(), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return part[(index + 1)..].Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<string?> GetWebIdAsync(string referer, CancellationToken cancellationToken)
+    {
+        var cookieWebId = TryGetCookieValue("webid") ?? TryGetCookieValue("ttwid");
+        if (!string.IsNullOrWhiteSpace(cookieWebId) && cookieWebId.All(char.IsDigit))
+        {
+            return cookieWebId;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://mcs.zijieapi.com/webid?aid=6383&sdk_version=5.1.24_dy");
+            request.Headers.TryAddWithoutValidation("User-Agent", DouyinConstants.UserAgent);
+            request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+            request.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+            request.Headers.TryAddWithoutValidation("Referer", DouyinConstants.HomeUrl);
+            request.Headers.TryAddWithoutValidation("sec-ch-ua", "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"");
+            request.Headers.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+            request.Headers.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
+            request.Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                app_id = 6383,
+                url = referer,
+                user_agent = DouyinConstants.UserAgent,
+                referer = string.Empty,
+                user_unique_id = string.Empty,
+            }), Encoding.UTF8, "application/json");
+
+            using var response = await http.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(body);
+            if (TryGetProperty(doc.RootElement, "web_id", out var webId) && webId.ValueKind == JsonValueKind.String)
+            {
+                var value = webId.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    BotLog.Info($"MyParser 抖音 webid 获取成功: webid={value}");
+                    return value;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or TaskCanceledException)
+        {
+            BotLog.Warning($"MyParser 抖音 webid 获取失败: error={ex.Message}");
+        }
+
+        return null;
+    }
+
     private async Task<string?> TryFetchSearchCoverUrlAsync(string title, string awemeId, CancellationToken cancellationToken)
     {
         var keyword = BuildSearchKeyword(title);
@@ -329,10 +465,15 @@ public sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWor
         return null;
     }
 
-    private async Task<JsonDocument> GetJsonAsync(string url, string referer, CancellationToken cancellationToken)
+    private async Task<JsonDocument> GetJsonAsync(string url, string referer, CancellationToken cancellationToken, string? uifid = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyDefaultHeaders(request, referer);
+        if (!string.IsNullOrWhiteSpace(uifid))
+        {
+            request.Headers.TryAddWithoutValidation("uifid", uifid);
+        }
+
         if (!string.IsNullOrWhiteSpace(MyParserRuntime.DouyinCookie))
         {
             request.Headers.TryAddWithoutValidation("Cookie", MyParserRuntime.DouyinCookie);
@@ -345,14 +486,90 @@ public sealed class DouyinParseService(HttpClient http, IReadOnlyList<IDouyinWor
             throw new DouyinParseException($"抖音接口请求失败：HTTP {(int)response.StatusCode}");
         }
 
+        var contentType = response.Content.Headers.ContentType?.ToString() ?? string.Empty;
+        var whaleAbortData = TryGetHeaderValue(response, "x-whale-throughput-abort-data");
+        var whaleAbortText = TryDecodeBase64Utf8(whaleAbortData);
+        if (body.Length == 0)
+        {
+            LogNonJsonResponse(url, referer, response, contentType, whaleAbortText, whaleAbortData, body);
+            if (IsForceLoginAbort(whaleAbortText) || IsForceLoginAbort(whaleAbortData))
+            {
+                throw new DouyinParseException(BuildForceLoginMessage());
+            }
+
+            throw new DouyinParseException("抖音接口返回空响应，可能被风控拦截。请配置或更新有效 DouyinCookie 后重试。 ");
+        }
+
         try
         {
             return JsonDocument.Parse(body);
         }
         catch (JsonException ex)
         {
+            LogNonJsonResponse(url, referer, response, contentType, whaleAbortText, whaleAbortData, body);
+
+            if (IsForceLoginAbort(whaleAbortText) || IsForceLoginAbort(whaleAbortData))
+            {
+                throw new DouyinParseException(BuildForceLoginMessage());
+            }
+
             throw new DouyinParseException("抖音接口返回的不是有效 JSON：" + ex.Message);
         }
+    }
+
+    private static void LogNonJsonResponse(string url, string referer, HttpResponseMessage response, string contentType, string? whaleAbortText, string? whaleAbortData, string body)
+    {
+        var safeBody = body.Length <= 2048 ? body.ReplaceLineEndings(" ") : body[..2048].ReplaceLineEndings(" ") + "...(truncated)";
+        BotLog.Warning(
+            "MyParser 抖音接口返回非 JSON rawdata: "
+            + $"url={url}, referer={referer}, http={(int)response.StatusCode}, content_type={contentType}, body_length={body.Length}, whale_abort={whaleAbortText ?? whaleAbortData ?? string.Empty}, rawdata={safeBody}");
+    }
+
+    private static string? TryGetHeaderValue(HttpResponseMessage response, string name)
+    {
+        return response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
+    }
+
+    private static string? TryDecodeBase64Utf8(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetString(Convert.FromBase64String(value));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsForceLoginAbort(string? whaleAbortText)
+    {
+        return !string.IsNullOrWhiteSpace(whaleAbortText)
+               && whaleAbortText.Contains("anonymous", StringComparison.OrdinalIgnoreCase)
+               && (whaleAbortText.Contains("\"id\":53", StringComparison.OrdinalIgnoreCase)
+                   || whaleAbortText.Contains("\"id\": 53", StringComparison.OrdinalIgnoreCase)
+                   || whaleAbortText.Contains("\"id\":296", StringComparison.OrdinalIgnoreCase)
+                   || whaleAbortText.Contains("\"id\": 296", StringComparison.OrdinalIgnoreCase)
+                   || whaleAbortText.Contains("强制登录", StringComparison.OrdinalIgnoreCase)
+                   || whaleAbortText.Contains("强登", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BuildForceLoginMessage()
+    {
+        var hasUifid = TryGetCookieValue("UIFID") is not null || TryGetCookieValue("UIFID_TEMP") is not null;
+        var hasMsToken = TryGetCookieValue("msToken") is not null;
+        var hasVerifyFp = TryGetCookieValue("s_v_web_id") is not null || TryGetCookieValue("verifyFp") is not null || TryGetCookieValue("fp") is not null;
+        if (hasUifid && (!hasMsToken || !hasVerifyFp))
+        {
+            return $"抖音接口触发强制登录/风控模型。当前 DouyinCookie 是游客 Cookie 但安全态不完整：has_msToken={hasMsToken}, has_s_v_web_id_or_verifyFp={hasVerifyFp}。请从浏览器 Network 请求头复制完整 Cookie（至少包含 UIFID/UIFID_TEMP、msToken、s_v_web_id/verifyFp）后重试。";
+        }
+
+        return "抖音接口要求登录后才能解析（服务端返回强制登录/风控模型）。请配置或更新有效 DouyinCookie 后重试。";
     }
 
     private DouyinParseResult ParseAwemeDetail(JsonDocument doc, string fallbackAwemeId, string sourceUrl)

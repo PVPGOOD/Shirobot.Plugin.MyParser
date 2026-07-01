@@ -25,7 +25,7 @@ Shirobot.Plugin.MyParser 是 [ShiroBot](https://github.com/ShirokaProject/ShiroB
 | 小红书 | `MyParser.Provider.Xiaohongshu` | [MyParser.Provider.Xiaohongshu/README.MD](./MyParser.Provider.Xiaohongshu/README.MD) |
 | 小黑盒 | `MyParser.Provider.Heybox` | [MyParser.Provider.Heybox/README.MD](./MyParser.Provider.Heybox/README.MD) |
 | 网易云音乐 | `MyParser.Provider.NetEaseCloudMusic` | [MyParser.Provider.NetEaseCloudMusic/README.MD](./MyParser.Provider.NetEaseCloudMusic/README.MD) |
-| 微信视频号 | `MyParser.Provider.WeixinChannels` | 暂无独立文档 |
+| 微信视频号 | `MyParser.Provider.WeixinChannels` | [MyParser.Provider.WeixinChannels/README.MD](./MyParser.Provider.WeixinChannels/README.MD) |
 
 ## 部署
 

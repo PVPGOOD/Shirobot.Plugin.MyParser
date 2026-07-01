@@ -38,6 +38,9 @@ jobs:
       - name: Build
         run: dotnet build MyParser.sln --configuration Release --no-restore -p:CopyPluginToHost=false -p:BuildMyParserProvidersOnMainPluginBuild=false -v:minimal
 
+      - name: Publish NetEase provider dependencies
+        run: dotnet publish MyParser.Provider.NetEaseCloudMusic/MyParser.Provider.NetEaseCloudMusic.csproj --configuration Release --no-restore --no-build --output release/netease-publish -p:CopyPluginToHost=false -p:UpdateMyParserMainPluginOnProviderBuild=false -v:minimal
+
       - name: Collect release package
         shell: pwsh
         run: |
@@ -47,38 +50,64 @@ jobs:
           New-Item -ItemType Directory -Force -Path $providerRoot | Out-Null
 
           $mainOut = Join-Path $PWD "MyParser/bin/Release/net10.0"
-          $providerOuts = @(
-            (Join-Path $PWD "MyParser.Provider.BiliBili/bin/Release/net10.0"),
-            (Join-Path $PWD "MyParser.Provider.Douyin/bin/Release/net10.0"),
-            (Join-Path $PWD "MyParser.Provider.Xiaohongshu/bin/Release/net10.0")
-          )
+          $providers = @{
+            "bilibili" = Join-Path $PWD "MyParser.Provider.BiliBili/bin/Release/net10.0"
+            "douyin" = Join-Path $PWD "MyParser.Provider.Douyin/bin/Release/net10.0"
+            "xiaohongshu" = Join-Path $PWD "MyParser.Provider.Xiaohongshu/bin/Release/net10.0"
+            "heybox" = Join-Path $PWD "MyParser.Provider.Heybox/bin/Release/net10.0"
+            "neteasecloudmusic" = Join-Path $PWD "MyParser.Provider.NetEaseCloudMusic/bin/Release/net10.0"
+          }
 
           $mainFiles = @(
             "Shirobot.Plugin.MyParser.dll",
             "myparser-sharing.dll",
             "QrCodeGenerator.dll"
           )
-
           foreach ($file in $mainFiles) {
             $source = Join-Path $mainOut $file
-            if (-not (Test-Path $source)) {
-              throw "Missing release file: $source"
-            }
+            if (-not (Test-Path $source)) { throw "Missing release file: $source" }
             Copy-Item $source $packageRoot -Force
           }
 
-          foreach ($out in $providerOuts) {
-            Get-ChildItem $out -Filter "myparser-provider-*.dll" -File | Copy-Item -Destination $providerRoot -Force
+          foreach ($name in $providers.Keys) {
+            $out = $providers[$name]
+            $providerDll = Join-Path $out "myparser-provider-$name.dll"
+            if (-not (Test-Path $providerDll)) { throw "Missing provider file: $providerDll" }
+            Copy-Item $providerDll $providerRoot -Force
           }
 
+          $netEasePublishOut = Join-Path $PWD "release/netease-publish"
+          $silkSharp = Join-Path $netEasePublishOut "SilkSharp.dll"
+          $silkCodec = Join-Path $netEasePublishOut "runtimes/win-x64/native/silkcodec.dll"
+          if (-not (Test-Path $silkSharp)) { throw "Missing SilkSharp dependency: $silkSharp" }
+          if (-not (Test-Path $silkCodec)) { throw "Missing silkcodec native dependency: $silkCodec" }
+          Copy-Item $silkSharp $providerRoot -Force
+          Copy-Item $silkCodec $providerRoot -Force
+
           $providerCount = (Get-ChildItem $providerRoot -Filter "myparser-provider-*.dll" -File).Count
-          if ($providerCount -ne 3) {
-            throw "Expected 3 provider dlls, found $providerCount"
+          if ($providerCount -ne 5) {
+            throw "Expected 5 provider dlls, found $providerCount"
           }
 
           New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot "cookies") | Out-Null
-          foreach ($cookie in @("bilibili.txt", "douyin.txt", "xiaohongshu.txt")) {
+          foreach ($cookie in @("bilibili.txt", "douyin.txt", "xiaohongshu.txt", "netease.txt")) {
             New-Item -ItemType File -Force -Path (Join-Path $packageRoot "cookies/$cookie") | Out-Null
+          }
+
+          $required = @(
+            (Join-Path $packageRoot "Shirobot.Plugin.MyParser.dll"),
+            (Join-Path $packageRoot "myparser-sharing.dll"),
+            (Join-Path $packageRoot "QrCodeGenerator.dll"),
+            (Join-Path $providerRoot "myparser-provider-bilibili.dll"),
+            (Join-Path $providerRoot "myparser-provider-douyin.dll"),
+            (Join-Path $providerRoot "myparser-provider-xiaohongshu.dll"),
+            (Join-Path $providerRoot "myparser-provider-heybox.dll"),
+            (Join-Path $providerRoot "myparser-provider-neteasecloudmusic.dll"),
+            (Join-Path $providerRoot "SilkSharp.dll"),
+            (Join-Path $providerRoot "silkcodec.dll")
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing expected release package file: $path" }
           }
 
           Compress-Archive -Path $packageRoot -DestinationPath "release/Shirobot.Plugin.MyParser.zip" -Force

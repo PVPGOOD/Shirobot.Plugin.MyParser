@@ -23,6 +23,12 @@ public sealed class PluginConfig
     [ConfigField("是否自动解析聊天中的网易云音乐歌曲链接。", Label = "自动解析网易云音乐链接")]
     public bool AutoParseNetEaseCloudMusicLinks { get; set; } = true;
 
+    [ConfigField("是否自动解析聊天中的微信视频号链接。", Label = "自动解析微信视频号链接")]
+    public bool AutoParseWeixinChannelsLinks { get; set; } = true;
+
+    [ConfigField("腾讯元宝网页 Cookie，用于解析 weixin.qq.com/sph 视频号分享链接。", Label = "腾讯元宝 Cookie", Type = "password")]
+    public string WeixinChannelsYuanbaoCookie { get; set; } = string.Empty;
+
     [ConfigField("发送网易云音乐语音时是否额外发送手机高音质版。关闭时默认只发送电脑兼容版。", Label = "网易云额外发送手机高音质语音")]
     public bool SendNetEaseMobileBestRecord { get; set; } = false;
 

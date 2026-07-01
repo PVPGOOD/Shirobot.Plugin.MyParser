@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AssemblyName>myparser-provider-weixinchannels</AssemblyName>
+        <RootNamespace>MyParser.Provider.WeixinChannels</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="ShiroBot.AvaloniaSdk" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\MyParser.Sharing\MyParser.Sharing.csproj" />
+    </ItemGroup>
+
+</Project>

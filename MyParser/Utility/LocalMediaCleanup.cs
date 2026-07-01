@@ -115,6 +115,7 @@ internal static class LocalMediaCleanup
         yield return ResolveRoot(MyParserRuntime.DownloadDirectory, Path.Combine("downloads", "MyParser", "douyin"));
         yield return ResolveRoot(MyParserRuntime.BilibiliDownloadDirectory, Path.Combine("downloads", "MyParser", "bilibili"));
         yield return ResolveRoot(MyParserRuntime.XiaohongshuDownloadDirectory, Path.Combine("downloads", "MyParser", "xiaohongshu"));
+        yield return ResolveRoot(MyParserRuntime.WeixinChannelsDownloadDirectory, Path.Combine("downloads", "MyParser", "weixinchannels"));
         yield return Path.Combine(Path.GetTempPath(), "Shirobot.Plugin.MyParser");
     }
 

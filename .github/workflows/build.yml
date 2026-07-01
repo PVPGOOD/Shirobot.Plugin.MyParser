@@ -47,6 +47,7 @@ jobs:
             "xiaohongshu" = Join-Path $PWD "MyParser.Provider.Xiaohongshu/bin/Release/net10.0"
             "heybox" = Join-Path $PWD "MyParser.Provider.Heybox/bin/Release/net10.0"
             "neteasecloudmusic" = Join-Path $PWD "MyParser.Provider.NetEaseCloudMusic/bin/Release/net10.0"
+            "weixinchannels" = Join-Path $PWD "MyParser.Provider.WeixinChannels/bin/Release/net10.0"
           }
 
           $mainFiles = @(
@@ -82,7 +83,8 @@ jobs:
             (Join-Path $providerRoot "myparser-provider-douyin.dll"),
             (Join-Path $providerRoot "myparser-provider-xiaohongshu.dll"),
             (Join-Path $providerRoot "myparser-provider-heybox.dll"),
-            (Join-Path $providerRoot "myparser-provider-neteasecloudmusic.dll")
+            (Join-Path $providerRoot "myparser-provider-neteasecloudmusic.dll"),
+            (Join-Path $providerRoot "myparser-provider-weixinchannels.dll")
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing expected package file: $path" }

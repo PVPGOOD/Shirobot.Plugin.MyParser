@@ -589,11 +589,13 @@ public sealed class MyParserPlugin : PluginBase
         MyParserRuntime.DownloadDirectory = Path.Combine(pluginDir, "tmp", "douyin");
         MyParserRuntime.BilibiliDownloadDirectory = Path.Combine(pluginDir, "tmp", "bilibili");
         MyParserRuntime.XiaohongshuDownloadDirectory = Path.Combine(pluginDir, "tmp", "xiaohongshu");
+        MyParserRuntime.WeixinChannelsDownloadDirectory = Path.Combine(pluginDir, "tmp", "weixinchannels");
 
         Directory.CreateDirectory(Path.Combine(pluginDir, CookieDirectoryName));
         Directory.CreateDirectory(MyParserRuntime.DownloadDirectory);
         Directory.CreateDirectory(MyParserRuntime.BilibiliDownloadDirectory);
         Directory.CreateDirectory(MyParserRuntime.XiaohongshuDownloadDirectory);
+        Directory.CreateDirectory(MyParserRuntime.WeixinChannelsDownloadDirectory);
         LocalMediaCleanup.CleanupStartupResidues(_config);
     }
 

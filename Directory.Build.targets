@@ -26,6 +26,7 @@
     <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.Xiaohongshu\MyParser.Provider.Xiaohongshu.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.Xiaohongshu\MyParser.Provider.Xiaohongshu.csproj')" />
     <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.Heybox\MyParser.Provider.Heybox.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.Heybox\MyParser.Provider.Heybox.csproj')" />
     <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.NetEaseCloudMusic\MyParser.Provider.NetEaseCloudMusic.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.NetEaseCloudMusic\MyParser.Provider.NetEaseCloudMusic.csproj')" />
+    <MyParserProviderProject Include="$(MSBuildThisFileDirectory)MyParser.Provider.WeixinChannels\MyParser.Provider.WeixinChannels.csproj" Condition="Exists('$(MSBuildThisFileDirectory)MyParser.Provider.WeixinChannels\MyParser.Provider.WeixinChannels.csproj')" />
   </ItemGroup>
 
   <Target Name="CopyMyParserProviderToHost"

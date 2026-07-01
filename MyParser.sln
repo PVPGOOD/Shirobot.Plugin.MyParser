@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyParser.Provider.Heybox", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyParser.Provider.NetEaseCloudMusic", "MyParser.Provider.NetEaseCloudMusic\MyParser.Provider.NetEaseCloudMusic.csproj", "{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyParser.Provider.WeixinChannels", "MyParser.Provider.WeixinChannels\MyParser.Provider.WeixinChannels.csproj", "{A63171CB-E089-4A95-8DBF-859EA99C9DC7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -113,6 +115,18 @@ Global
 		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x64.Build.0 = Release|Any CPU
 		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x86.ActiveCfg = Release|Any CPU
 		{8AC2ED2D-A3FD-4C2C-931A-DC0E548B8764}.Release|x86.Build.0 = Release|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Debug|x64.Build.0 = Debug|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Debug|x86.Build.0 = Debug|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Release|x64.ActiveCfg = Release|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Release|x64.Build.0 = Release|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Release|x86.ActiveCfg = Release|Any CPU
+		{A63171CB-E089-4A95-8DBF-859EA99C9DC7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -91,6 +91,7 @@
         <ItemGroup>
             <PluginDebugOutput Include="$(TargetDir)**\*"
                                Exclude="$(TargetDir)myparser-provider-*.dll;$(TargetDir)myparser-provider-*.pdb;$(TargetDir)Avalonia*.dll;$(TargetDir)Avalonia*.pdb;$(TargetDir)HarfBuzzSharp.dll;$(TargetDir)HarfBuzzSharp.pdb;$(TargetDir)MicroCom.Runtime.dll;$(TargetDir)MicroCom.Runtime.pdb;$(TargetDir)SkiaSharp.dll;$(TargetDir)SkiaSharp.pdb;$(TargetDir)runtimes\**\*;$(TargetDir)$(AssemblyName).exe;$(TargetDir)$(AssemblyName).runtimeconfig.json;$(TargetDir)ShiroBot.AvaloniaSdk.dll;$(TargetDir)ShiroBot.AvaloniaSdk.pdb;$(TargetDir)ShiroBot.SDK.dll;$(TargetDir)ShiroBot.SDK.pdb;$(TargetDir)ShiroBot.Model.dll;$(TargetDir)ShiroBot.Model.pdb" />
+            <PluginDebugNativeOutput Include="$(TargetDir)runtimes\win-x64\native\silkcodec.dll" Condition="Exists('$(TargetDir)runtimes\win-x64\native\silkcodec.dll')" />
             <ProviderDebugOutput Include="$(TargetDir)myparser-provider-*.dll;$(TargetDir)myparser-provider-*.pdb" />
             <PluginPreviewOnlyOutput Include="$(HostPluginDir)Avalonia*.dll;$(HostPluginDir)Avalonia*.pdb;$(HostPluginDir)HarfBuzzSharp.dll;$(HostPluginDir)HarfBuzzSharp.pdb;$(HostPluginDir)MicroCom.Runtime.dll;$(HostPluginDir)MicroCom.Runtime.pdb;$(HostPluginDir)SkiaSharp.dll;$(HostPluginDir)SkiaSharp.pdb;$(HostPluginDir)$(AssemblyName).exe;$(HostPluginDir)$(AssemblyName).runtimeconfig.json;$(HostPluginDir)runtimes\**\*" />
         </ItemGroup>
@@ -101,6 +102,10 @@
         <Copy SourceFiles="@(PluginDebugOutput)"
               DestinationFiles="@(PluginDebugOutput->'$(HostPluginDir)%(RecursiveDir)%(Filename)%(Extension)')"
               SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(PluginDebugNativeOutput)"
+              DestinationFiles="@(PluginDebugNativeOutput->'$(HostPluginDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true"
+              Condition="'@(PluginDebugNativeOutput)' != ''" />
 
         <MakeDir Directories="$(HostPluginDir)provider\" />
         <Copy SourceFiles="@(ProviderDebugOutput)"

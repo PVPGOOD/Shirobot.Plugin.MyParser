@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using SilkSharp;
 using SilkSharp.Codec;
@@ -10,6 +11,11 @@ namespace Shirobot.Plugin.MyParser.Services;
 
 internal sealed class ProviderDownloadService
 {
+    private static readonly Lock SilkNativeResolverLock = new();
+    private static bool SilkNativeResolverRegistered;
+    private static IntPtr SilkNativeHandle;
+    private static string? SilkNativePath;
+
     public Task<(string FileUri, string LocalPath)> DownloadProviderVideoAsync(
         PluginConfig config,
         ProviderVideoDownloadRequest request,
@@ -428,6 +434,7 @@ internal sealed class ProviderDownloadService
         try
         {
             await ConvertToPcmAsync(ffmpeg, request.LocalAudioPath, tempPcmPath, cancellationToken).ConfigureAwait(false);
+            EnsureSilkNativeResolver();
 
             var encoder = new SilkEncoder
             {
@@ -457,6 +464,119 @@ internal sealed class ProviderDownloadService
             TryDelete(tempPcmPath);
             TryDelete(tempSilkPath);
         }
+    }
+
+    private static void EnsureSilkNativeResolver()
+    {
+        lock (SilkNativeResolverLock)
+        {
+            if (!SilkNativeResolverRegistered)
+            {
+                NativeLibrary.SetDllImportResolver(typeof(SilkEncoder).Assembly, ResolveSilkNativeLibrary);
+                SilkNativeResolverRegistered = true;
+                BotLog.Info($"MyParser SILK native resolver registered: assembly={typeof(SilkEncoder).Assembly.Location}, base_dir={AppContext.BaseDirectory}");
+            }
+
+            if (SilkNativeHandle != IntPtr.Zero)
+            {
+                BotLog.Info($"MyParser SILK native codec ready: {SilkNativePath}");
+                return;
+            }
+
+            var candidates = EnumerateSilkNativeCandidates().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            BotLog.Info("MyParser SILK native codec probing: " + string.Join(" | ", candidates.Select(path => File.Exists(path) ? "exists=" + path : "missing=" + path)));
+            var handle = TryLoadSilkNativeLibraryNoLock();
+            if (handle == IntPtr.Zero)
+            {
+                throw new DllNotFoundException("未找到 silkcodec 原生库。请确认插件目录存在 silkcodec.dll，或存在 runtimes/win-x64/native/silkcodec.dll。候选路径：" + string.Join("; ", candidates));
+            }
+        }
+    }
+
+    private static IntPtr ResolveSilkNativeLibrary(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
+    {
+        if (!libraryName.Contains("silkcodec", StringComparison.OrdinalIgnoreCase))
+        {
+            return IntPtr.Zero;
+        }
+
+        lock (SilkNativeResolverLock)
+        {
+            if (SilkNativeHandle != IntPtr.Zero)
+            {
+                return SilkNativeHandle;
+            }
+
+            return TryLoadSilkNativeLibraryNoLock();
+        }
+    }
+
+    private static IntPtr TryLoadSilkNativeLibraryNoLock()
+    {
+        foreach (var candidate in EnumerateSilkNativeCandidates().Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(candidate))
+            {
+                continue;
+            }
+
+            if (NativeLibrary.TryLoad(candidate, out var handle))
+            {
+                SilkNativeHandle = handle;
+                SilkNativePath = candidate;
+                BotLog.Info($"MyParser SILK native codec loaded: {candidate}");
+                return handle;
+            }
+
+            BotLog.Warning($"MyParser SILK native codec load failed: {candidate}");
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private static IEnumerable<string> EnumerateSilkNativeCandidates()
+    {
+        var fileName = OperatingSystem.IsWindows()
+            ? "silkcodec.dll"
+            : OperatingSystem.IsMacOS()
+                ? "libsilkcodec.dylib"
+                : "libsilkcodec.so";
+        var rid = GetSilkNativeRuntimeIdentifier();
+        var assemblyDir = Path.GetDirectoryName(typeof(ProviderDownloadService).Assembly.Location);
+        var baseDir = AppContext.BaseDirectory;
+        var roots = new[]
+        {
+            assemblyDir,
+            baseDir,
+            Path.Combine(baseDir, "plugins", "Shirobot.Plugin.MyParser"),
+        }.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var root in roots)
+        {
+            yield return Path.Combine(root!, fileName);
+            yield return Path.Combine(root!, "runtimes", rid, "native", fileName);
+        }
+    }
+
+    private static string GetSilkNativeRuntimeIdentifier()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return RuntimeInformation.ProcessArchitecture == Architecture.X86 ? "win-x86" : "win-x64";
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "osx-arm64" : "osx-x64";
+        }
+
+        return RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.Arm => "linux-arm",
+            Architecture.Arm64 => "linux-arm64",
+            Architecture.X86 => "linux-x86",
+            _ => "linux-x64",
+        };
     }
 
     private static async Task ConvertToPcmAsync(string ffmpeg, string inputPath, string outputPcmPath, CancellationToken cancellationToken)
